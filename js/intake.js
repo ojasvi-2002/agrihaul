@@ -61,8 +61,12 @@ function titleCase(s) {
   return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
+// FIXED: String(p) guards against non-string phone values. parseCSV()
+// (js/data.js) no longer coerces Phone columns to numbers, but this
+// extra guard means normalizePhone() never throws even if a caller
+// passes a raw number, null, or undefined — it just returns "".
 function normalizePhone(p) {
-  return (p || "").replace(/\D/g, "");
+  return String(p || "").replace(/\D/g, "");
 }
 
 function matchFarmerByPhone(phone, farmers) {
