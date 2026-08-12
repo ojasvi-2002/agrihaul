@@ -3,7 +3,7 @@
 // ============================================================
 // Load order: config.js → auth.js → data.js → intake.js → map.js →
 // tables.js → app.js. Requires the Supabase JS CDN tag in index.html
-// (see IMPLEMENTATION_GUIDE.md) and CONFIG.SUPABASE.URL / ANON_KEY.
+// and CONFIG.SUPABASE.URL / ANON_KEY.
 //
 // Every dashboard user authenticates through Supabase Auth (email
 // verification is required — turned on in Supabase Dashboard →
@@ -15,11 +15,31 @@
 //   - sendEmailOtp() / verifyEmailOtp()   emails a 6-digit code
 //
 // Roles (admin / dispatcher / viewer) live in the `profiles` table
-// created by supabase_schema.sql and are enforced two places:
+// and are enforced two places:
 //   1. Client-side, here, to show/hide nav + pages (UX only).
 //   2. Server-side, in Code.gs, which re-checks the role against
 //      Supabase before honoring any write — so hiding a button isn't
 //      the only thing standing between a "viewer" and a real change.
+//
+// FIXED IN THIS AUDIT:
+//   - getSupabase() used to read window.CONFIG.SUPABASE, but config.js
+//     nested that block under CONFIG.APP.SUPABASE instead. That silent
+//     mismatch meant getSupabase() always returned null and every
+//     login/signup call failed — this is why authentication didn't
+//     work at all. Fixed to read CONFIG.SUPABASE first (the documented
+//     location) and fall back to CONFIG.APP.SUPABASE for compatibility
+//     with any existing config.js that still has it nested there.
+//   - Every function that calls getSupabase() now checks for null
+//     before touching `sb.auth`/`sb.from`. Previously, an unconfigured
+//     Supabase client meant these all threw a raw, uncaught
+//     "Cannot read properties of null" TypeError instead of failing
+//     gracefully with a message the UI could show.
+//   - signUp() now detects Supabase's "identities: []" response, which
+//     is what Supabase returns (with ok/no error) when someone signs
+//     up with an email that already has an account, to avoid leaking
+//     which emails are registered. Previously this looked exactly like
+//     a brand-new signup and told the person to "check your email"
+//     when nothing new was actually sent.
 // ============================================================
 
 const ROLE_PAGES = {
@@ -34,18 +54,25 @@ let _profile  = null;
 
 function getSupabase() {
   if (_supabase) return _supabase;
-  const cfg = window.CONFIG?.SUPABASE || {};
+  const cfg = window.CONFIG?.SUPABASE || window.CONFIG?.APP?.SUPABASE || {};
   if (!cfg.URL || !cfg.ANON_KEY) {
     console.error("[AgriHaul] Supabase not configured — set CONFIG.SUPABASE.URL / ANON_KEY in config.js.");
+    return null;
+  }
+  if (!window.supabase?.createClient) {
+    console.error("[AgriHaul] Supabase JS SDK not loaded — check the CDN <script> tag in index.html.");
     return null;
   }
   _supabase = window.supabase.createClient(cfg.URL, cfg.ANON_KEY);
   return _supabase;
 }
 
+const NOT_CONFIGURED = { ok: false, error: "Sign-in isn't configured yet. Contact your administrator." };
+
 // ── SIGN-UP (email + password; Supabase emails a verification link) ─
 async function signUp(email, password, fullName) {
   const sb = getSupabase();
+  if (!sb) return NOT_CONFIGURED;
   const { data, error } = await sb.auth.signUp({
     email, password,
     options: {
@@ -54,6 +81,13 @@ async function signUp(email, password, fullName) {
     },
   });
   if (error) return { ok: false, error: error.message };
+  // Supabase returns a "successful" signUp with no session AND an empty
+  // identities array when the email is already registered (this is
+  // intentional, to avoid confirming which emails exist). Surface that
+  // as a real error instead of telling the person to check their inbox.
+  if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    return { ok: false, error: "An account with this email already exists. Try signing in instead." };
+  }
   // data.session is null until the person clicks the verification link.
   return { ok: true, needsVerification: !data.session };
 }
@@ -61,6 +95,7 @@ async function signUp(email, password, fullName) {
 // ── PASSWORD LOGIN ────────────────────────────────────────────
 async function signInWithPassword(email, password) {
   const sb = getSupabase();
+  if (!sb) return NOT_CONFIGURED;
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, error: error.message };
   _session = data.session;
@@ -70,6 +105,7 @@ async function signInWithPassword(email, password) {
 // ── MAGIC LINK (passwordless — emails a one-click sign-in URL) ──────
 async function sendMagicLink(email) {
   const sb = getSupabase();
+  if (!sb) return NOT_CONFIGURED;
   const { error } = await sb.auth.signInWithOtp({
     email,
     options: { emailRedirectTo: window.location.origin + window.location.pathname },
@@ -81,6 +117,7 @@ async function sendMagicLink(email) {
 // ── EMAIL OTP (6-digit code, no link to click) ───────────────────────
 async function sendEmailOtp(email) {
   const sb = getSupabase();
+  if (!sb) return NOT_CONFIGURED;
   // shouldCreateUser:false means only people who already have an
   // account can request a code — new accounts still go through signUp().
   const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
@@ -90,6 +127,7 @@ async function sendEmailOtp(email) {
 
 async function verifyEmailOtp(email, token) {
   const sb = getSupabase();
+  if (!sb) return NOT_CONFIGURED;
   const { data, error } = await sb.auth.verifyOtp({ email, token, type: "email" });
   if (error) return { ok: false, error: error.message };
   _session = data.session;
@@ -101,6 +139,8 @@ async function verifyEmailOtp(email, token) {
 // in case a session already exists (e.g. a magic-link redirect).
 async function loadSession() {
   const sb = getSupabase();
+  if (!sb) return null;
+
   const { data: { session } } = await sb.auth.getSession();
   _session = session;
   if (!session) { _profile = null; return null; }
@@ -129,7 +169,7 @@ function canAccessPage(pageId) {
 
 async function signOut() {
   const sb = getSupabase();
-  await sb.auth.signOut();
+  if (sb) await sb.auth.signOut();
   _session = null;
   _profile = null;
 }
@@ -138,6 +178,7 @@ async function signOut() {
 // tabs. Use this in app.js to keep the UI in sync automatically.
 function onAuthChange(callback) {
   const sb = getSupabase();
+  if (!sb) return;
   sb.auth.onAuthStateChange((_event, session) => {
     _session = session;
     callback(session);
