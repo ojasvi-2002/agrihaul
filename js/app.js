@@ -34,29 +34,89 @@ function startClock() {
   setInterval(tick, 1000);
 }
 
+// ── LOGIN MODE STATE ────────────────────────────────────────
+// Three sign-in paths, all backed by Supabase (see js/auth.js):
+//   "password"  — classic email + password
+//   "magiclink" — emails a one-click sign-in link, no password needed
+//   "otp"       — emails a 6-digit code, type it in to sign in
+// setLoginMode() just shows/hides the right input fields; the actual
+// network calls happen in doLogin() below.
+
+let _loginMode = "password";
+
+function setLoginMode(mode) {
+  _loginMode = mode;
+  document.getElementById("loginPassField").style.display = mode === "password" ? "" : "none";
+  document.getElementById("loginOtpField").style.display  = mode === "otp" ? "" : "none";
+  document.querySelectorAll(".login-tabs button").forEach(b => b.classList.remove("btn-primary"));
+  document.getElementById("tab-" + mode)?.classList.add("btn-primary");
+  document.getElementById("loginBtn").textContent =
+    mode === "password" ? "Sign in →" : mode === "magiclink" ? "Email me a link →" : "Send code →";
+}
+
 // ── AUTH ──────────────────────────────────────────────────────
-// Simple credential check against config.js values.
-// For production, swap this with Supabase Auth or Netlify Identity:
-//   https://supabase.com/docs/guides/auth
-//   https://docs.netlify.com/security/secure-access-to-your-sites/identity/
+// Replaces the old hardcoded-password check. Every login now goes
+// through Supabase (js/auth.js), which verifies the person's email
+// and hands back a session + role. See supabase_schema.sql for how
+// roles are stored, and Code.gs for how the role is re-checked
+// server-side before any write is honored.
 
 async function doLogin() {
-  const user = document.getElementById("loginUser").value.trim();
-  const pass = document.getElementById("loginPass").value;
-  const btn  = document.getElementById("loginBtn");
+  const email = document.getElementById("loginEmail").value.trim();
+  const btn = document.getElementById("loginBtn");
+  if (!email) { showToast("Enter your email", true); return; }
 
-  const cfg = window.CONFIG?.APP || {};
-  if (!cfg.DEMO_USERNAME || !cfg.DEMO_PASSWORD) {
-    // Config not set — allow any non-empty credentials for demo
-    if (!user || !pass) { showToast("Enter credentials", true); return; }
-  } else {
-    if (user !== cfg.DEMO_USERNAME || pass !== cfg.DEMO_PASSWORD) {
-      showToast("Invalid credentials", true); return;
-    }
-  }
-
-  btn.textContent = "Loading...";
   btn.disabled = true;
+
+  if (_loginMode === "password") {
+    const pass = document.getElementById("loginPass").value;
+    const res = await signInWithPassword(email, pass);
+    if (!res.ok) { showToast(res.error, true); btn.disabled = false; return; }
+    await completeLogin();
+
+  } else if (_loginMode === "magiclink") {
+    const res = await sendMagicLink(email);
+    btn.disabled = false;
+    showToast(res.ok ? "Check your email for the sign-in link" : res.error, !res.ok);
+
+  } else if (_loginMode === "otp") {
+    const code = document.getElementById("loginOtp").value.trim();
+    if (!code) {
+      // First click: no code entered yet — request one.
+      const res = await sendEmailOtp(email);
+      btn.disabled = false;
+      showToast(res.ok ? "Code sent — enter it above" : res.error, !res.ok);
+      return;
+    }
+    // Second click: code entered — verify it.
+    const res = await verifyEmailOtp(email, code);
+    if (!res.ok) { showToast(res.error, true); btn.disabled = false; return; }
+    await completeLogin();
+  }
+}
+
+async function doSignUp() {
+  const email = document.getElementById("loginEmail").value.trim();
+  const pass  = document.getElementById("loginPass").value;
+  if (!email || !pass) { showToast("Enter an email and password to sign up", true); return; }
+  const res = await signUp(email, pass);
+  showToast(res.ok
+    ? "Check your email to verify your account, then sign in"
+    : res.error, !res.ok);
+}
+
+// Runs once login/verification succeeds, regardless of which of the
+// three sign-in modes got us here.
+async function completeLogin() {
+  const profile = await loadSession();
+  if (!profile) { showToast("Could not load your profile — contact an admin", true); return; }
+
+  document.getElementById("loginScreen").style.display = "none";
+  document.getElementById("mainApp").style.display     = "grid";
+  document.getElementById("clientLabel").textContent    =
+    profile.client_name || window.CONFIG?.APP?.CLIENT_NAME || profile.email;
+
+  applyRolePermissions();
 
   // Load initial data
   appData = await loadAllData();
@@ -64,11 +124,6 @@ async function doLogin() {
   _allTrucks    = [...appData.trucks];
   _allDispatches= [...appData.dispatches];
   _allRequests  = buildRequestQueue(appData.requests, appData.farmers);
-
-  document.getElementById("loginScreen").style.display = "none";
-  document.getElementById("mainApp").style.display     = "grid";
-  document.getElementById("clientLabel").textContent   =
-    cfg.CLIENT_NAME || user;
 
   // Render initial state
   renderAll();
@@ -81,21 +136,43 @@ async function doLogin() {
   }
 }
 
-function doLogout() {
+// Hides nav items (and, via the showPage guard below, whole pages)
+// the current role isn't allowed to see. This is UX only — the real
+// enforcement happens server-side in Code.gs, so a viewer can't get
+// around this by editing the page with DevTools.
+function applyRolePermissions() {
+  document.querySelectorAll(".nav-item[data-page]").forEach(item => {
+    const page = item.dataset.page;
+    item.style.display = canAccessPage(page) ? "" : "none";
+  });
+}
+
+async function doLogout() {
   clearInterval(refreshTimer);
-  document.getElementById("mainApp").style.display   = "none";
-  document.getElementById("loginScreen").style.display = "flex";
-  document.getElementById("loginBtn").textContent = "Sign in";
+  await signOut();
+  document.getElementById("mainApp").style.display     = "none";
+  document.getElementById("loginScreen").style.display  = "flex";
   document.getElementById("loginBtn").disabled = false;
 }
 
-// Allow Enter key on login form
-document.addEventListener("DOMContentLoaded", () => {
-  ["loginUser","loginPass"].forEach(id => {
-    document.getElementById(id)?.addEventListener("keydown", e => {
-      if (e.key === "Enter") doLogin();
-    });
+// Restore an existing session on page load (e.g. after a magic-link
+// redirect brings someone back to this page already signed in, or
+// they just still have a valid session from earlier). Also listens
+// for sign-out / token-refresh events so multi-tab logout works.
+document.addEventListener("DOMContentLoaded", async () => {
+  setLoginMode("password");
+
+  const profile = await loadSession();
+  if (profile) await completeLogin();
+
+  onAuthChange(async (session) => {
+    if (!session) { doLogout(); return; }
+    if (!currentProfile()) await completeLogin();
   });
+
+  document.getElementById("loginOtp")?.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  document.getElementById("loginPass")?.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  document.getElementById("loginEmail")?.addEventListener("keydown", e => { if (e.key === "Enter" && _loginMode === "password") doLogin(); });
 });
 
 // ── DATA REFRESH ──────────────────────────────────────────────
@@ -126,6 +203,10 @@ function renderAll() {
 
 // ── PAGE ROUTING ──────────────────────────────────────────────
 function showPage(id, sourceEl) {
+  // RBAC guard: block navigation to a page this role can't see, even
+  // if triggered by a stale link or from the browser console.
+  if (!canAccessPage(id)) { showToast("You don't have access to that page", true); return; }
+
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
   document.getElementById("page-" + id)?.classList.add("active");
@@ -234,10 +315,11 @@ async function simulateDispatch() {
 
 // ── ADD TRUCK ─────────────────────────────────────────────────
 // Adds to local state immediately, then writes through to the
-// Trucks tab via the Apps Script endpoint (see apps-script/Code.gs).
-// If SHEETS.WRITE_URL isn't configured yet, the truck still shows up
-// in this session but won't survive a refresh or show up for anyone
-// else — postToSheet() logs that to the console either way.
+// Trucks tab via the Apps Script endpoint (see Code.gs). The write
+// now carries the logged-in user's Supabase access token (added in
+// postToSheet, js/data.js) so Code.gs can verify their role before
+// honoring it. If SHEETS.WRITE_URL isn't configured yet, the truck
+// still shows up in this session but won't survive a refresh.
 
 async function addTruck() {
   const get = id => document.getElementById(id)?.value.trim();
