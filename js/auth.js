@@ -1,0 +1,145 @@
+// ============================================================
+// js/auth.js  —  Authentication + RBAC (Supabase-backed)
+// ============================================================
+// Load order: config.js → auth.js → data.js → intake.js → map.js →
+// tables.js → app.js. Requires the Supabase JS CDN tag in index.html
+// (see IMPLEMENTATION_GUIDE.md) and CONFIG.SUPABASE.URL / ANON_KEY.
+//
+// Every dashboard user authenticates through Supabase Auth (email
+// verification is required — turned on in Supabase Dashboard →
+// Authentication → Providers → Email → "Confirm email"). Three sign-in
+// paths are supported; pick whichever your ops team prefers, or offer
+// all three:
+//   - signInWithPassword()   classic email + password
+//   - sendMagicLink()        emails a one-click sign-in link
+//   - sendEmailOtp() / verifyEmailOtp()   emails a 6-digit code
+//
+// Roles (admin / dispatcher / viewer) live in the `profiles` table
+// created by supabase_schema.sql and are enforced two places:
+//   1. Client-side, here, to show/hide nav + pages (UX only).
+//   2. Server-side, in Code.gs, which re-checks the role against
+//      Supabase before honoring any write — so hiding a button isn't
+//      the only thing standing between a "viewer" and a real change.
+// ============================================================
+
+const ROLE_PAGES = {
+  admin:      ["dashboard", "map", "requests", "dispatch", "trucks", "farmers"],
+  dispatcher: ["dashboard", "map", "requests", "dispatch", "trucks", "farmers"],
+  viewer:     ["dashboard", "map", "dispatch"],
+};
+
+let _supabase = null;
+let _session  = null;
+let _profile  = null;
+
+function getSupabase() {
+  if (_supabase) return _supabase;
+  const cfg = window.CONFIG?.SUPABASE || {};
+  if (!cfg.URL || !cfg.ANON_KEY) {
+    console.error("[AgriHaul] Supabase not configured — set CONFIG.SUPABASE.URL / ANON_KEY in config.js.");
+    return null;
+  }
+  _supabase = window.supabase.createClient(cfg.URL, cfg.ANON_KEY);
+  return _supabase;
+}
+
+// ── SIGN-UP (email + password; Supabase emails a verification link) ─
+async function signUp(email, password, fullName) {
+  const sb = getSupabase();
+  const { data, error } = await sb.auth.signUp({
+    email, password,
+    options: {
+      data: { full_name: fullName || "" },
+      emailRedirectTo: window.location.origin + window.location.pathname,
+    },
+  });
+  if (error) return { ok: false, error: error.message };
+  // data.session is null until the person clicks the verification link.
+  return { ok: true, needsVerification: !data.session };
+}
+
+// ── PASSWORD LOGIN ────────────────────────────────────────────
+async function signInWithPassword(email, password) {
+  const sb = getSupabase();
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) return { ok: false, error: error.message };
+  _session = data.session;
+  return { ok: true };
+}
+
+// ── MAGIC LINK (passwordless — emails a one-click sign-in URL) ──────
+async function sendMagicLink(email) {
+  const sb = getSupabase();
+  const { error } = await sb.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: window.location.origin + window.location.pathname },
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+// ── EMAIL OTP (6-digit code, no link to click) ───────────────────────
+async function sendEmailOtp(email) {
+  const sb = getSupabase();
+  // shouldCreateUser:false means only people who already have an
+  // account can request a code — new accounts still go through signUp().
+  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+async function verifyEmailOtp(email, token) {
+  const sb = getSupabase();
+  const { data, error } = await sb.auth.verifyOtp({ email, token, type: "email" });
+  if (error) return { ok: false, error: error.message };
+  _session = data.session;
+  return { ok: true };
+}
+
+// ── SESSION + PROFILE (role) ─────────────────────────────────────────
+// Call this right after any successful sign-in, and once on page load
+// in case a session already exists (e.g. a magic-link redirect).
+async function loadSession() {
+  const sb = getSupabase();
+  const { data: { session } } = await sb.auth.getSession();
+  _session = session;
+  if (!session) { _profile = null; return null; }
+
+  const { data: profile, error } = await sb
+    .from("profiles")
+    .select("id, email, full_name, role, client_name")
+    .eq("id", session.user.id)
+    .single();
+
+  if (error) { console.error("[AgriHaul] Could not load profile:", error.message); return null; }
+  _profile = profile;
+  return profile;
+}
+
+function currentSession() { return _session; }
+function currentProfile() { return _profile; }
+function currentRole()    { return _profile?.role || null; }
+function getAccessToken() { return _session?.access_token || null; }
+
+function canAccessPage(pageId) {
+  const role = currentRole();
+  if (!role) return false;
+  return (ROLE_PAGES[role] || []).includes(pageId);
+}
+
+async function signOut() {
+  const sb = getSupabase();
+  await sb.auth.signOut();
+  _session = null;
+  _profile = null;
+}
+
+// Fires on sign-in, sign-out, and token refresh — including in other
+// tabs. Use this in app.js to keep the UI in sync automatically.
+function onAuthChange(callback) {
+  const sb = getSupabase();
+  sb.auth.onAuthStateChange((_event, session) => {
+    _session = session;
+    callback(session);
+  });
+}
