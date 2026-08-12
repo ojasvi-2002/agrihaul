@@ -1,26 +1,27 @@
 // ============================================================
 // js/app.js  —  Page Routing, Auth Flow, Actions
 // ============================================================
-// THIS FILE WAS MISSING FROM THE REPO.
-//
-// What shipped as js/app.js was actually a stray copy of js/data.js
-// (same seed data, same fetchSheet/postToSheet/loadAllData code, just
-// a slightly older version). That means none of the behaviour
-// index.html already wires up by name — doLogin(), doSignUp(),
-// setLoginMode(), showPage(), toggleTheme(), openModal()/closeModal(),
-// addTruck(), addFarmer(), cycleStatus(), ingestMessages(),
-// loadIntakeExample(), simulateIncomingSMS(), simulateDispatch(),
-// confirmRequest()/dispatchRequest()/discardRequest(), doLogout() —
-// existed anywhere in the codebase. Every one of those onclick
-// handlers would throw "ReferenceError: X is not defined" the moment
-// it was clicked, and the login button did literally nothing. This
-// file replaces that duplicate with the real application logic.
-//
 // Load order (index.html): config.js → auth.js → data.js → intake.js
 // → map.js → tables.js → app.js — so every helper this file calls
 // (signInWithPassword, loadAllData, renderFarmerTable, escapeHtml,
-// buildRequestQueue, haversineKm, statusBadge, …) is already defined
-// by the time these functions run.
+// buildRequestQueue, haversineKm, statusBadge, postToSheet, …) is
+// already defined by the time these functions run.
+//
+// FIXED IN THIS AUDIT:
+//   - Added the Users admin page: loadUsers(), inviteUserSubmit(),
+//     changeUserRole(), requestRemoveUser(). These call postToSheet()
+//     the same way farmer/truck writes do — same endpoint, same
+//     accessToken-carrying request, just different `action` values
+//     that Code.gs now understands (listUsers/inviteUser/
+//     updateUserRole/removeUser).
+//   - Generalized runConfirmedDelete() (previously farmer/truck only)
+//     to also handle type "user", sharing the one confirm-delete modal.
+//   - showPage() now calls loadUsers() when navigating to the Users
+//     page, the same way it already refreshes the map on navigation.
+//   The sign-up bugs (missing name field, wrong button/link wiring)
+//   were actually in index.html, not here — see that file's comments.
+//   enterSignupView()/enterSigninView()/handleAuthSubmit() below were
+//   already correct; they just had nothing to attach to before.
 // ============================================================
 
 // ── APP STATE ────────────────────────────────────────────────
@@ -34,7 +35,7 @@ let _authView  = "signin";   // "signin" | "signup"
 let _loginMode = "password"; // "password" | "magiclink" | "otp"
 let _otpStage  = "request";  // "request" | "verify"
 
-let _pendingDelete  = null;  // { type: "farmer"|"truck", key, label }
+let _pendingDelete  = null;  // { type: "farmer"|"truck"|"user", key, label }
 let _refreshTimer   = null;
 let _toastTimer     = null;
 let _clockTimer     = null;
@@ -249,16 +250,12 @@ function toggleAuthView() {
   else enterSignupView();
 }
 
-// Kept for compatibility with the "Create an account" link markup.
-function doSignUpLinkFallback() { toggleAuthView(); }
-
 async function doLogin() {
   const emailEl = document.getElementById("loginEmail");
   const email = (emailEl?.value || "").trim();
   if (!isValidEmail(email)) { showToast("Enter a valid email address.", true); return; }
 
   const btn = document.getElementById("loginBtn");
-  const originalLabel = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
 
   try {
@@ -371,6 +368,7 @@ function showPage(pageId, navEl) {
   // The map canvas has zero width/height while its .page is
   // display:none, so pins must be (re-)placed only once it's visible.
   if (pageId === "map") renderMap(_farmers, _trucks);
+  if (pageId === "users") loadUsers();
 }
 
 // ============================================================
@@ -401,6 +399,9 @@ async function loadAndRenderAll() {
 
   if (document.getElementById("page-map")?.classList.contains("active")) {
     renderMap(_farmers, _trucks);
+  }
+  if (document.getElementById("page-users")?.classList.contains("active")) {
+    loadUsers();
   }
 }
 
@@ -560,13 +561,12 @@ function requestDeleteTruck(truckId, label) {
 }
 
 // ── SHARED DELETE CONFIRMATION ────────────────────────────────
-// Backs the confirm-delete modal used by both requestDeleteFarmer()
-// and requestDeleteTruck(). Talks to Code.gs via deleteFromSheet()
-// (js/data.js), which reports back a real { ok, error } result — so
-// unlike the old fire-and-forget postToSheet(), this can actually
-// tell the person whether the delete synced to the spreadsheet or
-// only happened locally, and roll the row back into view if it
-// failed server-side.
+// Backs the confirm-delete modal used by requestDeleteFarmer(),
+// requestDeleteTruck(), and requestRemoveUser(). Talks to Code.gs via
+// deleteFromSheet()/postToSheet() (js/data.js), which reports back a
+// real { ok, error } result — so unlike a fire-and-forget write, this
+// can actually tell the person whether the delete synced server-side
+// or failed, and leaves the row in place (and the modal open) if it did.
 async function runConfirmedDelete() {
   if (!_pendingDelete) { closeModal("confirmDelete"); return; }
   const { type, key, label } = _pendingDelete;
@@ -595,6 +595,12 @@ async function runConfirmedDelete() {
       renderMetrics(_farmers, _trucks, _dispatches);
       renderMap(_farmers, _trucks);
       showToast(`${label} deleted and removed from Sheets.`);
+
+    } else if (type === "user") {
+      const result = await postToSheet("removeUser", { userId: key });
+      if (!result.ok) throw new Error(result.error || "Remove failed");
+      showToast(`${label} removed.`);
+      await loadUsers();
     }
     closeModal("confirmDelete");
   } catch (err) {
@@ -605,6 +611,64 @@ async function runConfirmedDelete() {
     if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
     _pendingDelete = null;
   }
+}
+
+// ============================================================
+// USERS (super_admin only) — invite / list / change role / remove
+// ============================================================
+// All four talk to the same Apps Script endpoint as farmer/truck
+// writes (postToSheet in data.js), just with different `action`
+// values. Code.gs re-checks that the caller's own role is
+// super_admin before doing anything — hiding the "Users" nav item
+// for everyone else is a UX nicety, not the actual security boundary.
+
+async function loadUsers() {
+  if (currentRole() !== "super_admin") return;
+  const tbody = document.getElementById("usersTable");
+  if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="form-hint">Loading…</td></tr>`;
+  const res = await postToSheet("listUsers", {});
+  if (!res.ok) {
+    showToast(res.error || "Couldn't load users.", true);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="form-hint">Couldn't load users.</td></tr>`;
+    return;
+  }
+  renderUsersTable(res.users || []);
+}
+
+async function inviteUserSubmit() {
+  const email = (document.getElementById("inviteEmail")?.value || "").trim();
+  const role  = document.getElementById("inviteRole")?.value || "viewer";
+  if (!isValidEmail(email)) { showToast("Enter a valid email address.", true); return; }
+
+  const res = await postToSheet("inviteUser", { email, role });
+  if (res.ok) {
+    showToast(`Invited ${email}.`);
+    clearFields(["inviteEmail"]);
+    const roleSel = document.getElementById("inviteRole");
+    if (roleSel) roleSel.value = "viewer";
+    await loadUsers();
+  } else {
+    showToast(res.error || "Couldn't send invite.", true);
+  }
+}
+
+async function changeUserRole(userId, role) {
+  const res = await postToSheet("updateUserRole", { userId, role });
+  if (res.ok) {
+    showToast("Role updated.");
+  } else {
+    showToast(res.error || "Couldn't update role.", true);
+  }
+  await loadUsers(); // re-sync the dropdown either way
+}
+
+function requestRemoveUser(userId, label) {
+  if (!userId) return;
+  _pendingDelete = { type: "user", key: userId, label: label || "this user" };
+  document.getElementById("confirmDeleteTitle").textContent = "Remove user?";
+  document.getElementById("confirmDeleteBody").textContent =
+    `This permanently removes ${label || "this user"}'s account and sign-in access. This can't be undone.`;
+  openModal("confirmDelete");
 }
 
 // ============================================================
