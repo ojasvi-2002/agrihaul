@@ -14,14 +14,30 @@
 //   - sendMagicLink()        emails a one-click sign-in link
 //   - sendEmailOtp() / verifyEmailOtp()   emails a 6-digit code
 //
-// Roles (admin / dispatcher / viewer) live in the `profiles` table
-// and are enforced two places:
+// ROLES: viewer < dispatcher/admin < super_admin.
+//   - viewer      read-only: dashboard, map, dispatch log
+//   - dispatcher  everyday ops work: + requests, trucks, farmers
+//   - admin       same day-to-day access as dispatcher — the
+//                 difference between "admin" and "dispatcher" is
+//                 organizational, not technical, in this build
+//   - super_admin everything dispatcher/admin can do, PLUS the
+//                 Users page: invite people, change anyone's role
+//                 (including making/removing other admins), and
+//                 remove accounts entirely
+//
+// Roles live in the `profiles` table (see supabase_schema.sql) and
+// are enforced two places:
 //   1. Client-side, here, to show/hide nav + pages (UX only).
 //   2. Server-side, in Code.gs, which re-checks the role against
 //      Supabase before honoring any write — so hiding a button isn't
 //      the only thing standing between a "viewer" and a real change.
 //
 // FIXED IN THIS AUDIT:
+//   - ROLE_PAGES had no `super_admin` key. canAccessPage()/
+//     applyRolePermissions() do `ROLE_PAGES[role] || []` — with no
+//     entry, a super_admin would see an empty page list and be
+//     locked out of the entire app the moment that role existed.
+//     Added below, including the new "users" page.
 //   - getSupabase() used to read window.CONFIG.SUPABASE, but config.js
 //     nested that block under CONFIG.APP.SUPABASE instead. That silent
 //     mismatch meant getSupabase() always returned null and every
@@ -43,9 +59,10 @@
 // ============================================================
 
 const ROLE_PAGES = {
-  admin:      ["dashboard", "map", "requests", "dispatch", "trucks", "farmers"],
-  dispatcher: ["dashboard", "map", "requests", "dispatch", "trucks", "farmers"],
-  viewer:     ["dashboard", "map", "dispatch"],
+  super_admin: ["dashboard", "map", "requests", "dispatch", "trucks", "farmers", "users"],
+  admin:       ["dashboard", "map", "requests", "dispatch", "trucks", "farmers"],
+  dispatcher:  ["dashboard", "map", "requests", "dispatch", "trucks", "farmers"],
+  viewer:      ["dashboard", "map", "dispatch"],
 };
 
 let _supabase = null;
