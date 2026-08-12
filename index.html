@@ -24,7 +24,14 @@
      LOGIN SCREEN — Farm/grass aesthetic with dark+light themes
      Auth is handled by Supabase (js/auth.js). Three sign-in modes:
      password, magic link, and email OTP — see setLoginMode() in
-     app.js. No more hardcoded demo credentials in config.js.
+     app.js. Sign-up additionally needs a Full name field, shown/
+     hidden by enterSignupView()/enterSigninView() in app.js.
+     FIXED: this card previously had no #loginModeTabs / #loginNameField
+     ids and no Full-name input, so the JS that shows/hides them for
+     sign-up silently found nothing; the "Create an account" link also
+     called doSignUp() directly instead of switching views, and the
+     submit button called doLogin() unconditionally — so sign-up could
+     never actually succeed. All three are fixed below.
      ============================================================ -->
 <div id="loginScreen">
   <button class="login-theme-btn" id="loginThemeBtn" onclick="toggleTheme()" title="Toggle dark/light mode">☀</button>
@@ -71,11 +78,18 @@
     <div class="login-tagline">Operations Portal</div>
 
     <!-- Sign-in mode tabs — clicking these calls setLoginMode() in app.js,
-         which shows/hides the password field vs the OTP field below. -->
-    <div class="login-tabs" style="display:flex;gap:6px;margin-bottom:18px">
+         which shows/hides the password field vs the OTP field below.
+         Hidden entirely during sign-up (enterSignupView() targets this id). -->
+    <div class="login-tabs" id="loginModeTabs" style="display:flex;gap:6px;margin-bottom:18px">
       <button class="btn btn-ghost btn-sm" onclick="setLoginMode('password')" id="tab-password">Password</button>
       <button class="btn btn-ghost btn-sm" onclick="setLoginMode('magiclink')" id="tab-magiclink">Magic link</button>
       <button class="btn btn-ghost btn-sm" onclick="setLoginMode('otp')" id="tab-otp">Email code</button>
+    </div>
+
+    <!-- Shown only in sign-up view (enterSignupView() in app.js) -->
+    <div class="login-field" id="loginNameField" style="display:none">
+      <label>Full name</label>
+      <input type="text" id="loginName" placeholder="Jane Doe" autocomplete="name">
     </div>
 
     <div class="login-field">
@@ -83,7 +97,7 @@
       <input type="email" id="loginEmail" placeholder="you@company.com" autocomplete="username">
     </div>
 
-    <!-- Shown for "password" mode, hidden for magic link / OTP -->
+    <!-- Shown for "password" mode / sign-up, hidden for magic link / OTP -->
     <div class="login-field" id="loginPassField">
       <label>Password</label>
       <input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password">
@@ -95,8 +109,13 @@
       <input type="text" id="loginOtp" placeholder="123456" inputmode="numeric" maxlength="6">
     </div>
 
-    <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign in →</button>
-    <p class="login-note" id="loginStatus">New here? <a href="#" onclick="doSignUp();return false;">Create an account</a></p>
+    <!-- FIXED: was onclick="doLogin()" (always logged in, never signed up).
+         handleAuthSubmit() in app.js routes to doLogin() or doSignUp()
+         based on the current view. -->
+    <button class="login-btn" id="loginBtn" onclick="handleAuthSubmit()">Sign in →</button>
+    <!-- FIXED: was onclick="doSignUp();return false;" — clicking this used
+         to attempt a sign-up immediately instead of switching views. -->
+    <p class="login-note" id="loginStatus">New here? <a href="#" onclick="toggleAuthView();return false;">Create an account</a></p>
   </div>
 </div>
 
@@ -188,6 +207,17 @@
         <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
       </svg>
       Farmers
+    </div>
+
+    <!-- Only rendered visible for role === 'super_admin' (applyRolePermissions()
+         in app.js hides any data-page not in ROLE_PAGES[currentRole]). -->
+    <div class="nav-section-label">Admin</div>
+    <div class="nav-item" data-page="users" onclick="showPage('users', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+        <path d="M12 2l7 3v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V5l7-3z"/>
+        <path d="M9.5 12l1.8 1.8L15 10"/>
+      </svg>
+      Users
     </div>
 
     <div class="nav-section-label">Account</div>
@@ -289,12 +319,6 @@
 
 
     <!-- ================================================== -->
-    <!--  PAGE: LIVE MAP                                    -->
-    <!--  Pins rendered by js/map.js using Lat/Lon from     -->
-    <!--  your Google Sheet.                                -->
-    <!--  MAP_BOUNDS in map.js covers West Africa.          -->
-    <!-- ================================================== -->
-    <!-- ================================================== -->
     <!--  PAGE: REQUESTS                                    -->
     <!--  Source: Requests sheet (raw inbound SMS, Phone/    -->
     <!--  Raw/ReceivedAt), parsed client-side in intake.js.  -->
@@ -336,6 +360,12 @@
     </div><!-- /requests -->
 
 
+    <!-- ================================================== -->
+    <!--  PAGE: LIVE MAP                                    -->
+    <!--  Pins rendered by js/map.js using Lat/Lon from     -->
+    <!--  your Google Sheet.                                -->
+    <!--  MAP_BOUNDS in map.js covers West Africa.          -->
+    <!-- ================================================== -->
     <div class="page" id="page-map">
       <div class="page-header">
         <div>
@@ -446,12 +476,53 @@
         <table>
           <thead><tr>
             <th>Name</th><th>Phone</th><th>Village</th>
-            <th>Lat</th><th>Lon</th><th>Registered</th>
+            <th>Lat</th><th>Lon</th><th>Registered</th><th></th>
           </tr></thead>
           <tbody id="farmerTable"></tbody>
         </table>
       </div>
     </div><!-- /farmers -->
+
+
+    <!-- ================================================== -->
+    <!--  PAGE: USERS  (super_admin only)                   -->
+    <!--  Add/remove teammates and change their role. Talks -->
+    <!--  to Code.gs (listUsers/inviteUser/updateUserRole/  -->
+    <!--  removeUser), which uses the Supabase service_role -->
+    <!--  key server-side — that key never touches the      -->
+    <!--  browser. See js/app.js loadUsers()/inviteUser-     -->
+    <!--  Submit()/changeUserRole()/requestRemoveUser().     -->
+    <!-- ================================================== -->
+    <div class="page" id="page-users">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Team & Access</div>
+          <div class="page-subtitle">Super admin only · who can sign in, and what they can do</div>
+        </div>
+      </div>
+
+      <div class="table-card" style="padding:16px; margin-bottom:16px;">
+        <label class="form-label" for="inviteEmail">Invite a new user</label>
+        <div class="form-actions" style="margin-top:8px; flex-wrap:wrap;">
+          <input class="form-input" type="email" id="inviteEmail" placeholder="teammate@company.com" style="flex:1; min-width:220px;">
+          <select class="form-select" id="inviteRole" style="width:170px;">
+            <option value="viewer">Viewer</option>
+            <option value="dispatcher">Dispatcher</option>
+            <option value="admin">Admin</option>
+            <option value="super_admin">Super admin</option>
+          </select>
+          <button class="btn btn-primary" onclick="inviteUserSubmit()">Send invite</button>
+        </div>
+        <div class="form-hint" style="margin-top:8px">They'll get an email to set a password and sign in. New accounts default to Viewer unless you pick a different role here.</div>
+      </div>
+
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
+          <tbody id="usersTable"></tbody>
+        </table>
+      </div>
+    </div><!-- /users -->
 
   </main>
 </div><!-- /mainApp -->
@@ -547,6 +618,29 @@
   </div>
 </div>
 
+<!-- ============================================================
+     MODAL: CONFIRM DELETE  (shared by farmers, trucks, and users)
+     FIXED: app.js already called openModal('confirmDelete') and
+     referenced #confirmDeleteTitle / #confirmDeleteBody /
+     #confirmDeleteBtn, but this modal never existed in the page —
+     so every Delete click silently did nothing. Added here, wired
+     to runConfirmedDelete() in app.js, which branches on
+     _pendingDelete.type ("farmer" | "truck" | "user").
+     ============================================================ -->
+<div class="modal-overlay" id="modal-confirmDelete">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <div class="modal-title" id="confirmDeleteTitle">Delete?</div>
+      <button class="modal-close" onclick="closeModal('confirmDelete')">✕</button>
+    </div>
+    <p id="confirmDeleteBody" style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-bottom:18px"></p>
+    <div class="form-actions">
+      <button class="btn btn-danger" id="confirmDeleteBtn" onclick="runConfirmedDelete()">Delete</button>
+      <button class="btn btn-ghost"  onclick="closeModal('confirmDelete')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast notification -->
 <div class="toast" id="toast"></div>
 
@@ -557,19 +651,19 @@
      1. config.js   — must be first of your own files (CONFIG object)
      2. auth.js     — Supabase login + RBAC, used by app.js
      3. data.js     — uses CONFIG, exports loadAllData / sendSMS
-     4. map.js      — uses statusClass from data.js
-     5. tables.js   — uses statusBadge from data.js
-     6. app.js      — uses everything above
+     4. intake.js   — SMS parsing, defines SEED_REQUESTS
+     5. map.js      — uses statusClass from data.js
+     6. tables.js   — uses statusBadge from data.js
+     7. app.js      — uses everything above
 
      TO CONNECT GOOGLE SHEETS:
        Edit js/config.js → SHEETS.FARMERS_URL / TRUCKS_URL / DISPATCH_URL
 
      TO ENABLE SMS:
-       Twilio keys now live in Apps Script Script Properties (Code.gs),
+       Twilio keys live in Apps Script Script Properties (Code.gs),
        NOT in js/config.js — the dashboard sends SMS by calling
        SHEETS.WRITE_URL with action "sendSms", which Code.gs relays to
-       Twilio server-side. Nothing Twilio-related belongs in this file
-       or config.js anymore.
+       Twilio server-side.
 
      TO ENABLE MAKE.COM AUTO-DISPATCH:
        Edit js/config.js → MAKE.WEBHOOK_URL
@@ -577,6 +671,11 @@
      TO CONFIGURE LOGIN:
        Edit js/config.js → SUPABASE.URL / SUPABASE.ANON_KEY
        (Supabase Dashboard → Settings → API)
+
+     TO MANAGE USERS (super_admin):
+       Code.gs needs SUPABASE_SERVICE_ROLE_KEY as a Script Property
+       (Project Settings → Script Properties) — this key is never
+       sent to the browser. See the "Users" page.
      ============================================================ -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/config.js"></script>
