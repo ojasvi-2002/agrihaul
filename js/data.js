@@ -12,6 +12,22 @@
 //   Requests sheet:    Phone, Raw, ReceivedAt (raw inbound SMS log, parsed
 //                       client-side in intake.js — see that file for the
 //                       NAME - PRODUCT - QUANTITY - LOCATION format)
+//
+// FIXED IN THIS AUDIT:
+//   - parseCSV() no longer auto-converts every numeric-looking cell to a
+//     JS number. It used to do that indiscriminately, which silently
+//     turned any Phone/TruckID/ReceivedAt/Registered value that happened
+//     to contain only digits into a Number — stripping leading zeros and
+//     crashing normalizePhone() (String methods don't exist on numbers).
+//     Only the columns in NUMERIC_FIELDS are now coerced.
+//   - postToSheet() used to fire with mode:"no-cors", which means the
+//     app could never actually tell whether a write succeeded — every
+//     add "succeeded" in the UI even if Apps Script threw or the
+//     deployment was stale/misconfigured. It now reads the JSON
+//     response, same pattern as sendSMS() below.
+//   - Added deleteFromSheet() for the new Delete Farmer / Delete Truck
+//     feature, and it also reads back a real ok/error result so the UI
+//     can show accurate success/failure toasts.
 // ============================================================
 
 // ── SEED DATA (used when Google Sheets URLs are empty) ──────
@@ -51,6 +67,18 @@ const SEED_DISPATCH = [
 // ── CSV PARSER ───────────────────────────────────────────────
 // Parses raw CSV text (from Google Sheets publish URL) into
 // an array of objects, using the first row as keys.
+//
+// Only these columns are ever coerced to a JS Number. Everything
+// else (Phone, TruckID, ReceivedAt, Registered, LastUpdated, Name,
+// Village, Raw, Status, Date, Time, Driver/Farmer names…) stays a
+// string, even if it happens to look numeric — e.g. a phone number
+// typed without a "+" or spaces. This was a real bug: a bare-digit
+// Phone value used to get silently converted to a Number, and later
+// normalizePhone(p) — which calls String.prototype.replace on the
+// assumption p is a string — would throw a TypeError and quietly
+// break farmer matching for that row.
+const NUMERIC_FIELDS = new Set(["Lat", "Lon", "WeightKG", "DistanceKM"]);
+
 function parseCSV(text) {
   const lines = text.trim().split("\n");
   if (lines.length < 2) return [];
@@ -68,8 +96,7 @@ function parseCSV(text) {
     const obj = {};
     headers.forEach((h, i) => {
       let val = (cols[i] || "").replace(/^"|"$/g, "");
-      // Auto-convert numbers
-      if (!isNaN(val) && val !== "") val = parseFloat(val);
+      if (NUMERIC_FIELDS.has(h) && val !== "" && !isNaN(val)) val = parseFloat(val);
       obj[h] = val;
     });
     return obj;
@@ -106,40 +133,76 @@ async function fetchSheet(url, seedData) {
   }
 }
 
-// ── WRITE PATH ───────────────────────────────────────────────
+// ── WRITE PATH (add) ─────────────────────────────────────────
 // fetchSheet() above only reads. A "Publish to web" CSV link can't
 // accept writes, so anything added on the dashboard (new farmer, new
 // truck, a dispatch, an SMS request) needs a separate endpoint that's
-// actually allowed to append a row: apps-script/Code.gs, deployed as
-// a Google Apps Script web app and pasted into SHEETS.WRITE_URL.
+// actually allowed to append a row: Code.gs, deployed as a Google
+// Apps Script web app and pasted into SHEETS.WRITE_URL.
 //
-// Apps Script web apps don't return CORS headers by default, so this
-// fires the request with mode:"no-cors" — we can't read the response,
-// but the write goes through. If SHEETS.WRITE_URL isn't set, this is
-// a no-op and the change stays local-only until you configure it.
+// Every write carries the logged-in user's Supabase access token
+// (getAccessToken(), from js/auth.js) so Code.gs can verify — on its
+// side, not just in this browser — that the person is actually signed
+// in and holds a role allowed to write (see verifyRole() in Code.gs).
+//
+// FIXED: this used to fire with mode:"no-cors", so the promise always
+// "succeeded" client-side the moment the request left the browser —
+// there was no way to know if Apps Script actually wrote the row, or
+// even that SHEETS.WRITE_URL pointed at a live deployment. It now
+// makes a normal (CORS-readable) request and returns the real
+// { ok, error } payload Code.gs sends back, same as sendSMS()/
+// deleteFromSheet() below. Content-Type stays "text/plain" so the
+// request remains a CORS "simple request" (no preflight OPTIONS,
+// which Apps Script web apps don't support).
 async function postToSheet(action, payload) {
   const url = window.CONFIG?.SHEETS?.WRITE_URL;
   if (!url) {
     console.info(`[AgriHaul] No WRITE_URL configured — ${action} kept local only.`);
-    return false;
+    return { ok: false, error: "WRITE_URL not configured" };
   }
   try {
-    await fetch(url, {
+    const resp = await fetch(url, {
       method: "POST",
-      mode: "no-cors",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, payload }),
+      body: JSON.stringify({ action, payload, accessToken: getAccessToken() }),
     });
-    return true;
+    const data = await resp.json().catch(() => null);
+    if (!data) return { ok: false, error: `Unexpected response (HTTP ${resp.status})` };
+    return data;
   } catch (err) {
     console.warn(`[AgriHaul] Failed to write ${action} to Sheets:`, err.message);
-    return false;
+    return { ok: false, error: err.message };
+  }
+}
+
+// ── DELETE PATH ──────────────────────────────────────────────
+// Backs the new Delete Farmer / Delete Truck feature. Talks to the
+// same Apps Script endpoint as postToSheet(), using "deleteFarmer" /
+// "deleteTruck" actions (see Code.gs). Code.gs looks the row up by
+// its natural key (Phone for farmers, TruckID for trucks), removes
+// it from the sheet, and reports back whether it actually found and
+// deleted a row — that result flows straight back here so the UI can
+// show an accurate success/error toast instead of assuming it worked.
+async function deleteFromSheet(action, payload) {
+  const url = window.CONFIG?.SHEETS?.WRITE_URL;
+  if (!url) return { ok: false, error: "WRITE_URL not configured — nothing to sync to." };
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, payload, accessToken: getAccessToken() }),
+    });
+    const data = await resp.json().catch(() => null);
+    if (!data) return { ok: false, error: `Unexpected response (HTTP ${resp.status})` };
+    return data;
+  } catch (err) {
+    return { ok: false, error: err.message };
   }
 }
 
 // ── MAIN DATA LOAD ───────────────────────────────────────────
 // Called on page load and every REFRESH_INTERVAL milliseconds.
-// Returns { farmers, trucks, dispatches } — all normalised.
+// Returns { farmers, trucks, dispatches, requests } — all normalised.
 
 async function loadAllData() {
   const cfg = window.CONFIG?.SHEETS || {};
@@ -155,7 +218,7 @@ async function loadAllData() {
   // Your sheet uses: "Available", "En Route", "Maintenance"
   // The badge system maps these to CSS classes
   trucks.forEach(t => {
-    t.Status = (t.Status || "").trim();
+    t.Status = (t.Status || "").toString().trim();
   });
 
   // Sort dispatches newest first (by Date + Time)
@@ -186,40 +249,39 @@ function statusClass(status) {
 
 function statusBadge(status) {
   const cls = statusClass(status);
-  return `<span class="badge ${cls}">${status}</span>`;
+  return `<span class="badge ${cls}">${escapeHtml(status)}</span>`;
 }
 
-// ── TWILIO SMS SENDER ─────────────────────────────────────────
+// ── TWILIO SMS SENDER (relayed through Apps Script) ────────────
 // Called when a manual dispatch is triggered from the dashboard.
 //
-// ⚠️  SECURITY NOTE:
-//   This sends the Twilio request directly from the browser.
-//   For a demo/internal tool this is fine.
-//   For a public-facing app, route through a Netlify Function:
-//   Create /netlify/functions/send-sms.js that reads keys from
-//   Netlify environment variables and calls Twilio server-side.
-//   See: https://docs.netlify.com/functions/get-started/
+// This used to call api.twilio.com directly from the browser, which
+// meant your Twilio Auth Token was visible to anyone with DevTools
+// open. It now POSTs to your own Apps Script endpoint (Code.gs)
+// instead, which holds the real Twilio credentials in its Script
+// Properties (never sent to any browser) and relays the send.
+// Code.gs also checks the caller's Supabase role before sending —
+// see verifyRole() there.
 //
-// HOW TO ENABLE:
-//   Fill in TWILIO.ACCOUNT_SID, AUTH_TOKEN, FROM_NUMBER in config.js
+// Unlike the old postToSheet(), this can't use mode:"no-cors" — we
+// need to read back whether the send actually succeeded, and Apps
+// Script's doPost responses are readable cross-origin for "simple"
+// (non-preflighted) requests like this one.
 
 async function sendSMS(toNumber, message) {
-  const tw = window.CONFIG?.TWILIO || {};
-  if (!tw.ACCOUNT_SID || !tw.AUTH_TOKEN || !tw.FROM_NUMBER) {
-    console.warn("[AgriHaul] Twilio not configured — SMS not sent. Add keys to config.js.");
-    return { ok: false, reason: "Twilio not configured" };
-  }
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${tw.ACCOUNT_SID}/Messages.json`;
-  const body = new URLSearchParams({ To: toNumber, From: tw.FROM_NUMBER, Body: message });
-  const auth = btoa(`${tw.ACCOUNT_SID}:${tw.AUTH_TOKEN}`);
+  const url = window.CONFIG?.SHEETS?.WRITE_URL;
+  if (!url) return { ok: false, reason: "WRITE_URL not configured" };
   try {
     const resp = await fetch(url, {
       method: "POST",
-      headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
-      body
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "sendSms",
+        payload: { to: toNumber, body: message },
+        accessToken: getAccessToken(),
+      }),
     });
-    const data = await resp.json();
-    return { ok: resp.ok, sid: data.sid, error: data.message };
+    return await resp.json();
   } catch (err) {
     return { ok: false, reason: err.message };
   }
