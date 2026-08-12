@@ -52,16 +52,7 @@ const CONFIG = {
   //     that proxies to Twilio server-side.
   //     See: https://docs.netlify.com/functions/overview/
   // ----------------------------------------------------------
-  TWILIO: {
-    ACCOUNT_SID:  "",
-    // Example: "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-    AUTH_TOKEN:   "",
-    // Example: "your_auth_token_here"
-
-    FROM_NUMBER:  "",
-    // Example: "+14155552671"  — the Twilio number you purchased
-  },
+ 
 
   // ----------------------------------------------------------
   // MAKE.COM WEBHOOK — Triggers your automated dispatch flow
@@ -94,8 +85,10 @@ const CONFIG = {
     // Demo login credentials (change before giving to client)
     // In production, replace with a real auth service like
     // Supabase Auth (free tier) or Netlify Identity
-    DEMO_USERNAME: "admin",
-    DEMO_PASSWORD: "agrihaulops2024",
+   SUPABASE: {
+     URL:      "https://zlcwiicpeejxbxpjsxcu.supabase.co",  
+     ANON_KEY: "sb_publishable_XGgiXLk92yFQm7pK2LaioQ_S6kmmELi",  
+   },
 
     // Map center coordinates — set to your operating region
     // Default: central Maharashtra, India
