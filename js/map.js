@@ -8,6 +8,13 @@
 // Your sheet spans Senegal → Ghana → Côte d'Ivoire → Guinea:
 //   Lat: ~4°N to ~16°N   Lon: ~-18°W to ~0°W
 // If you expand into new regions, update MAP_BOUNDS below.
+//
+// FIXED IN THIS AUDIT: tooltip content is built via innerHTML from
+// farmer/driver names and villages — the same stored-XSS surface as
+// tables.js — so it's now passed through escapeHtml() (defined in
+// tables.js, safe to reference here because by the time renderMap()
+// is actually called at runtime, every script tag has finished
+// loading and defining its globals).
 // ============================================================
 
 const MAP_BOUNDS = {
@@ -55,7 +62,7 @@ function renderMap(farmers, trucks) {
   function attachTooltip(el, lines) {
     el.addEventListener("mouseenter", e => {
       tooltip.innerHTML = lines.map((l, i) =>
-        i === 0 ? `<div class="tt-label">${l}</div>` : `<div>${l}</div>`
+        i === 0 ? `<div class="tt-label">${escapeHtml(l)}</div>` : `<div>${escapeHtml(l)}</div>`
       ).join("");
       tooltip.style.display = "block";
       // Position tooltip relative to canvas
