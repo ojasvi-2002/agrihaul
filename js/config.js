@@ -4,6 +4,14 @@
 // ⚠️  THIS FILE IS IN .gitignore — NEVER COMMIT IT TO GITHUB
 //     Copy config.example.js, fill in your values, save as
 //     config.js. The .gitignore will keep it out of git.
+//
+// FIXED IN THIS AUDIT: SUPABASE used to live nested under APP.SUPABASE,
+// but js/auth.js's getSupabase() reads window.CONFIG.SUPABASE (a
+// top-level key) — the mismatch meant Supabase never initialised, so
+// every login/signup attempt failed silently. SUPABASE is now a
+// top-level block, matching what auth.js (and its own header comment)
+// actually expects. auth.js also now falls back to CONFIG.APP.SUPABASE
+// defensively, but keep it here at the top level going forward.
 // ============================================================
 
 const CONFIG = {
@@ -35,24 +43,29 @@ const CONFIG = {
   },
 
   // ----------------------------------------------------------
-  // TWILIO — SMS gateway for manual dispatch from dashboard
+  // SUPABASE — Auth (login / signup / roles)
   // ----------------------------------------------------------
-  // HOW TO GET THESE VALUES:
-  // 1. Sign up at twilio.com (free trial: $15 credit)
-  // 2. Go to Console Dashboard → Account Info (top right)
-  // 3. Copy Account SID and Auth Token
-  // 4. Go to Phone Numbers → Buy a number with SMS enabled
-  // 5. Paste below
-  //
-  // ⚠️  SECURITY WARNING: Calling Twilio directly from the
-  //     browser exposes your Auth Token to anyone who opens
-  //     DevTools. This is fine for internal demos. For
-  //     production, replace the fetch in data.js sendSMS()
-  //     with a call to a Netlify Function or Cloudflare Worker
-  //     that proxies to Twilio server-side.
-  //     See: https://docs.netlify.com/functions/overview/
+  // Supabase Dashboard → Settings → API
+  // The ANON_KEY is a public/publishable key — it's meant to be
+  // shipped to the browser, unlike a service_role key, which must
+  // never appear in client code.
   // ----------------------------------------------------------
- 
+  SUPABASE: {
+    URL:      "https://zlcwiicpeejxbxpjsxcu.supabase.co",
+    ANON_KEY: "sb_publishable_XGgiXLk92yFQm7pK2LaioQ_S6kmmELi",
+  },
+
+  // ----------------------------------------------------------
+  // TWILIO — SMS gateway
+  // ----------------------------------------------------------
+  // Twilio credentials no longer live here. Calling Twilio directly
+  // from the browser would expose your Auth Token to anyone with
+  // DevTools open. Sending SMS now goes through data.js → sendSMS(),
+  // which POSTs to SHEETS.WRITE_URL with action "sendSms"; Code.gs
+  // holds the real Twilio credentials server-side in its Script
+  // Properties (TWILIO_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM) and
+  // relays the send after verifying the caller's role. See Code.gs.
+  // ----------------------------------------------------------
 
   // ----------------------------------------------------------
   // MAKE.COM WEBHOOK — Triggers your automated dispatch flow
@@ -79,16 +92,9 @@ const CONFIG = {
     // Name shown in the topbar and browser tab
     APP_NAME: "AgriHaul Ops",
 
-    // Your client's company name (shown after login)
+    // Your client's company name (shown after login, unless the
+    // signed-in user's Supabase profile has its own client_name)
     CLIENT_NAME: "Greenfields Agritech",
-
-    // Demo login credentials (change before giving to client)
-    // In production, replace with a real auth service like
-    // Supabase Auth (free tier) or Netlify Identity
-   SUPABASE: {
-     URL:      "https://zlcwiicpeejxbxpjsxcu.supabase.co",  
-     ANON_KEY: "sb_publishable_XGgiXLk92yFQm7pK2LaioQ_S6kmmELi",  
-   },
 
     // Map center coordinates — set to your operating region
     // Default: central Maharashtra, India
