@@ -1,522 +1,256 @@
 // ============================================================
-// js/app.js  —  Main Application Logic
+// js/data.js  —  Data Layer: Google Sheets + Seed Fallback
 // ============================================================
-// Handles: login/logout, page routing, data refresh loop,
-// theme toggle, add farmer/truck forms, manual dispatch,
-// truck status toggling.
+// This file does two things:
+//   1. Fetches live data from your published Google Sheets CSVs
+//   2. Falls back to seed data if Sheets aren't connected yet
+//
+// COLUMN NAMES are matched exactly to your AgriDispatch.xlsx:
+//   Farmers sheet:     Name, Phone, Village, Lat, Lon, Registered, SMSOptIn, LastReminderSent
+//   Trucks sheet:      TruckID, DriverName, Phone, Status, Lat, Lon, LastUpdated
+//   DispatchLog sheet: Date, Time, Farmer, Village, WeightKG, Driver, TruckID, DistanceKM
+//   Requests sheet:    Phone, Raw, ReceivedAt (raw inbound SMS log, parsed
+//                       client-side in intake.js — see that file for the
+//                       NAME - PRODUCT - QUANTITY - LOCATION format)
 // ============================================================
 
-// ── STATE ────────────────────────────────────────────────────
-let appData = { farmers: [], trucks: [], dispatches: [], requests: [] };
-let refreshTimer = null;
+// ── SEED DATA (used when Google Sheets URLs are empty) ──────
+// This mirrors your real sheet structure exactly.
+// Replace these with real data or connect Google Sheets.
 
-// ── BOOT ─────────────────────────────────────────────────────
-// Called once when the page loads.
-// Shows login screen; app shell stays hidden until auth.
+const SEED_FARMERS = [
+  { Name:"Amina Diallo",   Phone:"+221 77 000 0001", Village:"Thiès",   Lat:14.7833, Lon:-16.9240, Registered:"2024-03-15" },
+  { Name:"Kofi Mensah",    Phone:"+233 24 000 0002", Village:"Kumasi",  Lat:6.6885,  Lon:-1.6244,  Registered:"2024-04-02" },
+  { Name:"Fatou Traoré",   Phone:"+225 07 000 0003", Village:"Bouaké",  Lat:7.6881,  Lon:-5.0317,  Registered:"2024-05-20" },
+  { Name:"Kwame Asante",   Phone:"+233 24 000 0010", Village:"Accra",   Lat:5.5560,  Lon:-0.1969,  Registered:"2024-06-01" },
+  { Name:"Mariama Balde",  Phone:"+224 62 000 0011", Village:"Conakry", Lat:9.6412,  Lon:-13.5784, Registered:"2024-06-10" },
+  { Name:"Oumar Diop",     Phone:"+221 77 000 0012", Village:"Dakar",   Lat:14.6928, Lon:-17.4467, Registered:"2024-07-05" },
+  { Name:"Adjoa Mensah",   Phone:"+233 24 000 0013", Village:"Tamale",  Lat:9.4035,  Lon:-0.8393,  Registered:"2024-07-18" },
+  { Name:"Sékou Camara",   Phone:"+224 62 000 0014", Village:"Kankan",  Lat:10.3833, Lon:-9.3000,  Registered:"2024-08-02" },
+];
 
-document.addEventListener("DOMContentLoaded", () => {
-  startClock();
-  restoreTheme();
-  // Close modals when clicking outside
-  document.querySelectorAll(".modal-overlay").forEach(o => {
-    o.addEventListener("click", e => { if (e.target === o) o.classList.remove("open"); });
-  });
-});
+const SEED_TRUCKS = [
+  { TruckID:"TRK-001", DriverName:"Ibrahim Bah",       Phone:"+221 77 100 0001", Status:"Available",   Lat:14.6928, Lon:-17.4467, LastUpdated:"2025-05-24 08:00" },
+  { TruckID:"TRK-002", DriverName:"Moussa Coulibaly",  Phone:"+223 66 100 0002", Status:"En Route",    Lat:12.6392, Lon:-8.0029,  LastUpdated:"2025-05-24 09:15" },
+  { TruckID:"TRK-003", DriverName:"Yaw Boateng",       Phone:"+233 20 100 0003", Status:"Maintenance", Lat:5.5600,  Lon:-0.2057,  LastUpdated:"2025-05-23 17:30" },
+  { TruckID:"TRK-004", DriverName:"Amadou Traoré",     Phone:"+225 07 100 0004", Status:"Available",   Lat:7.6881,  Lon:-5.0317,  LastUpdated:"2025-05-24 07:45" },
+  { TruckID:"TRK-005", DriverName:"Kwabena Asare",     Phone:"+233 20 100 0005", Status:"Available",   Lat:6.6885,  Lon:-1.6244,  LastUpdated:"2025-05-24 09:00" },
+  { TruckID:"TRK-006", DriverName:"Mamadou Sow",       Phone:"+221 77 100 0006", Status:"En Route",    Lat:14.7833, Lon:-16.9240, LastUpdated:"2025-05-24 08:30" },
+  { TruckID:"TRK-007", DriverName:"Issouf Koné",       Phone:"+226 70 100 0007", Status:"Available",   Lat:12.3647, Lon:-1.5333,  LastUpdated:"2025-05-24 08:15" },
+  { TruckID:"TRK-008", DriverName:"Suleiman Diallo",   Phone:"+224 62 100 0008", Status:"Maintenance", Lat:9.6412,  Lon:-13.5784, LastUpdated:"2025-05-23 16:00" },
+];
 
-// ── CLOCK ─────────────────────────────────────────────────────
-function startClock() {
-  const el = document.getElementById("liveTime");
-  if (!el) return;
-  const tick = () => el.textContent = new Date().toLocaleTimeString("en-GB", {
-    hour: "2-digit", minute: "2-digit", second: "2-digit"
-  });
-  tick();
-  setInterval(tick, 1000);
-}
+const SEED_DISPATCH = [
+  { Date:"2025-05-24", Time:"07:30", Farmer:"Amina Diallo",  Village:"Thiès",   WeightKG:320, Driver:"Ibrahim Bah",      TruckID:"TRK-001", DistanceKM:42.5 },
+  { Date:"2025-05-24", Time:"08:45", Farmer:"Kofi Mensah",   Village:"Kumasi",  WeightKG:510, Driver:"Moussa Coulibaly", TruckID:"TRK-002", DistanceKM:87.3 },
+  { Date:"2025-05-23", Time:"14:00", Farmer:"Fatou Traoré",  Village:"Bouaké",  WeightKG:275, Driver:"Yaw Boateng",      TruckID:"TRK-003", DistanceKM:33.1 },
+  { Date:"2025-05-23", Time:"11:20", Farmer:"Kwame Asante",  Village:"Accra",   WeightKG:640, Driver:"Kwabena Asare",    TruckID:"TRK-005", DistanceKM:21.8 },
+  { Date:"2025-05-22", Time:"09:05", Farmer:"Mariama Balde", Village:"Conakry", WeightKG:190, Driver:"Suleiman Diallo",  TruckID:"TRK-008", DistanceKM:55.0 },
+];
 
-// ── LOGIN MODE STATE ────────────────────────────────────────
-// Three sign-in paths, all backed by Supabase (see js/auth.js):
-//   "password"  — classic email + password
-//   "magiclink" — emails a one-click sign-in link, no password needed
-//   "otp"       — emails a 6-digit code, type it in to sign in
-// setLoginMode() just shows/hides the right input fields; the actual
-// network calls happen in doLogin() below.
-
-let _loginMode = "password";
-
-function setLoginMode(mode) {
-  _loginMode = mode;
-  document.getElementById("loginPassField").style.display = mode === "password" ? "" : "none";
-  document.getElementById("loginOtpField").style.display  = mode === "otp" ? "" : "none";
-  document.querySelectorAll(".login-tabs button").forEach(b => b.classList.remove("btn-primary"));
-  document.getElementById("tab-" + mode)?.classList.add("btn-primary");
-  document.getElementById("loginBtn").textContent =
-    mode === "password" ? "Sign in →" : mode === "magiclink" ? "Email me a link →" : "Send code →";
-}
-
-// ── AUTH ──────────────────────────────────────────────────────
-// Replaces the old hardcoded-password check. Every login now goes
-// through Supabase (js/auth.js), which verifies the person's email
-// and hands back a session + role. See supabase_schema.sql for how
-// roles are stored, and Code.gs for how the role is re-checked
-// server-side before any write is honored.
-
-async function doLogin() {
-  const email = document.getElementById("loginEmail").value.trim();
-  const btn = document.getElementById("loginBtn");
-  if (!email) { showToast("Enter your email", true); return; }
-
-  btn.disabled = true;
-
-  if (_loginMode === "password") {
-    const pass = document.getElementById("loginPass").value;
-    const res = await signInWithPassword(email, pass);
-    if (!res.ok) { showToast(res.error, true); btn.disabled = false; return; }
-    await completeLogin();
-
-  } else if (_loginMode === "magiclink") {
-    const res = await sendMagicLink(email);
-    btn.disabled = false;
-    showToast(res.ok ? "Check your email for the sign-in link" : res.error, !res.ok);
-
-  } else if (_loginMode === "otp") {
-    const code = document.getElementById("loginOtp").value.trim();
-    if (!code) {
-      // First click: no code entered yet — request one.
-      const res = await sendEmailOtp(email);
-      btn.disabled = false;
-      showToast(res.ok ? "Code sent — enter it above" : res.error, !res.ok);
-      return;
+// ── CSV PARSER ───────────────────────────────────────────────
+// Parses raw CSV text (from Google Sheets publish URL) into
+// an array of objects, using the first row as keys.
+function parseCSV(text) {
+  const lines = text.trim().split("\n");
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
+  return lines.slice(1).map(line => {
+    // Handle quoted fields with commas inside
+    const cols = [];
+    let inQuote = false, cell = "";
+    for (let ch of line) {
+      if (ch === '"') { inQuote = !inQuote; }
+      else if (ch === "," && !inQuote) { cols.push(cell.trim()); cell = ""; }
+      else { cell += ch; }
     }
-    // Second click: code entered — verify it.
-    const res = await verifyEmailOtp(email, code);
-    if (!res.ok) { showToast(res.error, true); btn.disabled = false; return; }
-    await completeLogin();
-  }
-}
-
-async function doSignUp() {
-  const email = document.getElementById("loginEmail").value.trim();
-  const pass  = document.getElementById("loginPass").value;
-  if (!email || !pass) { showToast("Enter an email and password to sign up", true); return; }
-  const res = await signUp(email, pass);
-  showToast(res.ok
-    ? "Check your email to verify your account, then sign in"
-    : res.error, !res.ok);
-}
-
-// Runs once login/verification succeeds, regardless of which of the
-// three sign-in modes got us here.
-async function completeLogin() {
-  const profile = await loadSession();
-  if (!profile) { showToast("Could not load your profile — contact an admin", true); return; }
-
-  document.getElementById("loginScreen").style.display = "none";
-  document.getElementById("mainApp").style.display     = "grid";
-  document.getElementById("clientLabel").textContent    =
-    profile.client_name || window.CONFIG?.APP?.CLIENT_NAME || profile.email;
-
-  applyRolePermissions();
-
-  // Load initial data
-  appData = await loadAllData();
-  _allFarmers   = [...appData.farmers];
-  _allTrucks    = [...appData.trucks];
-  _allDispatches= [...appData.dispatches];
-  _allRequests  = buildRequestQueue(appData.requests, appData.farmers);
-
-  // Render initial state
-  renderAll();
-  showPage("dashboard");
-
-  // Start auto-refresh
-  const interval = window.CONFIG?.SHEETS?.REFRESH_INTERVAL || 30000;
-  if (interval > 0) {
-    refreshTimer = setInterval(refreshData, interval);
-  }
-}
-
-// Hides nav items (and, via the showPage guard below, whole pages)
-// the current role isn't allowed to see. This is UX only — the real
-// enforcement happens server-side in Code.gs, so a viewer can't get
-// around this by editing the page with DevTools.
-function applyRolePermissions() {
-  document.querySelectorAll(".nav-item[data-page]").forEach(item => {
-    const page = item.dataset.page;
-    item.style.display = canAccessPage(page) ? "" : "none";
+    cols.push(cell.trim());
+    const obj = {};
+    headers.forEach((h, i) => {
+      let val = (cols[i] || "").replace(/^"|"$/g, "");
+      // Auto-convert numbers
+      if (!isNaN(val) && val !== "") val = parseFloat(val);
+      obj[h] = val;
+    });
+    return obj;
   });
 }
 
-async function doLogout() {
-  clearInterval(refreshTimer);
-  await signOut();
-  document.getElementById("mainApp").style.display     = "none";
-  document.getElementById("loginScreen").style.display  = "flex";
-  document.getElementById("loginBtn").disabled = false;
+// ── FETCH FROM GOOGLE SHEETS ─────────────────────────────────
+// HOW IT WORKS:
+//   Your published Google Sheet CSV URL looks like:
+//   https://docs.google.com/spreadsheets/d/SHEET_ID/pub?gid=TAB_ID&single=true&output=csv
+//   Make.com writes new dispatch rows to DispatchLog automatically.
+//   This function re-fetches on every REFRESH_INTERVAL tick.
+//
+// If the URL is empty (not configured yet), returns seed data.
+
+async function fetchSheet(url, seedData) {
+  if (!url) {
+    // ── No URL configured — using seed data ─────────────────
+    // Once you paste your Google Sheets URL into config.js,
+    // this branch will never run.
+    console.info("[AgriHaul] No Sheet URL configured — using seed data.");
+    return seedData;
+  }
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    const parsed = parseCSV(text);
+    if (!parsed.length) throw new Error("Empty sheet response");
+    return parsed;
+  } catch (err) {
+    console.warn("[AgriHaul] Sheet fetch failed, using seed data:", err.message);
+    return seedData;
+  }
 }
 
-// Restore an existing session on page load (e.g. after a magic-link
-// redirect brings someone back to this page already signed in, or
-// they just still have a valid session from earlier). Also listens
-// for sign-out / token-refresh events so multi-tab logout works.
-document.addEventListener("DOMContentLoaded", async () => {
-  setLoginMode("password");
+// ── WRITE PATH ───────────────────────────────────────────────
+// fetchSheet() above only reads. A "Publish to web" CSV link can't
+// accept writes, so anything added on the dashboard (new farmer, new
+// truck, a dispatch, an SMS request) needs a separate endpoint that's
+// actually allowed to append a row: Code.gs, deployed as a Google
+// Apps Script web app and pasted into SHEETS.WRITE_URL.
+//
+// Every write now carries the logged-in user's Supabase access token
+// (getAccessToken(), from js/auth.js) so Code.gs can verify — on its
+// side, not just in this browser — that the person is actually signed
+// in and holds a role allowed to write (see verifyRole() in Code.gs).
+//
+// Apps Script web apps don't return CORS headers by default, so this
+// fires the request with mode:"no-cors" — we can't read the response,
+// but the write goes through. If SHEETS.WRITE_URL isn't set, this is
+// a no-op and the change stays local-only until you configure it.
+async function postToSheet(action, payload) {
+  const url = window.CONFIG?.SHEETS?.WRITE_URL;
+  if (!url) {
+    console.info(`[AgriHaul] No WRITE_URL configured — ${action} kept local only.`);
+    return false;
+  }
+  try {
+    await fetch(url, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, payload, accessToken: getAccessToken() }),
+    });
+    return true;
+  } catch (err) {
+    console.warn(`[AgriHaul] Failed to write ${action} to Sheets:`, err.message);
+    return false;
+  }
+}
 
-  const profile = await loadSession();
-  if (profile) await completeLogin();
+// ── MAIN DATA LOAD ───────────────────────────────────────────
+// Called on page load and every REFRESH_INTERVAL milliseconds.
+// Returns { farmers, trucks, dispatches } — all normalised.
 
-  onAuthChange(async (session) => {
-    if (!session) { doLogout(); return; }
-    if (!currentProfile()) await completeLogin();
+async function loadAllData() {
+  const cfg = window.CONFIG?.SHEETS || {};
+
+  const [farmers, trucks, dispatches, requests] = await Promise.all([
+    fetchSheet(cfg.FARMERS_URL,  SEED_FARMERS),
+    fetchSheet(cfg.TRUCKS_URL,   SEED_TRUCKS),
+    fetchSheet(cfg.DISPATCH_URL, SEED_DISPATCH),
+    fetchSheet(cfg.REQUESTS_URL, SEED_REQUESTS),
+  ]);
+
+  // Normalise status values from your sheet
+  // Your sheet uses: "Available", "En Route", "Maintenance"
+  // The badge system maps these to CSS classes
+  trucks.forEach(t => {
+    t.Status = (t.Status || "").trim();
   });
 
-  document.getElementById("loginOtp")?.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
-  document.getElementById("loginPass")?.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
-  document.getElementById("loginEmail")?.addEventListener("keydown", e => { if (e.key === "Enter" && _loginMode === "password") doLogin(); });
-});
+  // Sort dispatches newest first (by Date + Time)
+  dispatches.sort((a, b) => {
+    const da = new Date(`${a.Date}T${a.Time}`);
+    const db = new Date(`${b.Date}T${b.Time}`);
+    return db - da;
+  });
 
-// ── DATA REFRESH ──────────────────────────────────────────────
-// Runs every REFRESH_INTERVAL ms to pull fresh data from Sheets.
-// Make.com writes to DispatchLog after every SMS dispatch, so
-// new rows appear here automatically.
-
-async function refreshData() {
-  const fresh = await loadAllData();
-  appData = fresh;
-  _allFarmers    = [...fresh.farmers];
-  _allTrucks     = [...fresh.trucks];
-  _allDispatches = [...fresh.dispatches];
-  // Pass the existing queue in so confirmed/dispatched requests keep
-  // their status instead of resetting on every refresh tick.
-  _allRequests   = buildRequestQueue(fresh.requests, fresh.farmers, _allRequests);
-  renderAll();
-  showToast("Data refreshed");
+  return { farmers, trucks, dispatches, requests };
 }
 
-// ── RENDER ALL ────────────────────────────────────────────────
-function renderAll() {
-  renderMetrics(appData.farmers, appData.trucks, appData.dispatches);
-  renderRecentDispatches(appData.dispatches);
-  renderDashTrucks(appData.trucks);
-  updateRequestsBadge(_allRequests);
-}
+// ── STATUS BADGE HELPER ──────────────────────────────────────
+// Maps your exact sheet status strings to badge CSS classes.
+// If you rename statuses in the sheet, update this map too.
 
-// ── PAGE ROUTING ──────────────────────────────────────────────
-function showPage(id, sourceEl) {
-  // RBAC guard: block navigation to a page this role can't see, even
-  // if triggered by a stale link or from the browser console.
-  if (!canAccessPage(id)) { showToast("You don't have access to that page", true); return; }
-
-  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
-  document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
-  document.getElementById("page-" + id)?.classList.add("active");
-  if (sourceEl) sourceEl.classList.add("active");
-  else {
-    // Activate the right nav item by data attribute
-    document.querySelector(`[data-page="${id}"]`)?.classList.add("active");
-  }
-
-  // Lazy render per page
-  switch (id) {
-    case "map":
-      // Small delay lets the div paint before we measure offsetWidth
-      setTimeout(() => renderMap(appData.farmers, appData.trucks), 50);
-      break;
-    case "dispatch":
-      renderDispatchTable(_allDispatches);
-      break;
-    case "trucks":
-      renderTruckTable(_allTrucks);
-      break;
-    case "farmers":
-      renderFarmerTable(_allFarmers);
-      break;
-    case "requests":
-      renderRequestsTable(_allRequests, appData.trucks);
-      break;
-  }
-}
-
-// ── THEME TOGGLE ──────────────────────────────────────────────
-// Persists preference in localStorage so it survives page reload.
-
-function toggleTheme() {
-  const html = document.documentElement;
-  const isLight = html.classList.toggle("light");
-  const icon = isLight ? "☾" : "☀";
-  // Update both the main topbar button and the login screen button
-  const btn1 = document.getElementById("themeBtn");
-  const btn2 = document.getElementById("loginThemeBtn");
-  if (btn1) btn1.textContent = icon;
-  if (btn2) btn2.textContent = icon;
-  localStorage.setItem("agrihaulTheme", isLight ? "light" : "dark");
-}
-
-function restoreTheme() {
-  const saved = localStorage.getItem("agrihaulTheme");
-  if (saved === "light") {
-    document.documentElement.classList.add("light");
-    const icon = "☾";
-    const btn1 = document.getElementById("themeBtn");
-    const btn2 = document.getElementById("loginThemeBtn");
-    if (btn1) btn1.textContent = icon;
-    if (btn2) btn2.textContent = icon;
-  }
-}
-
-// ── TRUCK STATUS TOGGLE ───────────────────────────────────────
-// Changes status in local state (visual only).
-// To persist, you'd write back to Google Sheets via its API
-// or update the sheet manually. For now this is a dashboard
-// override for ops use.
-
-function cycleStatus(truckId) {
-  const t = appData.trucks.find(t => t.TruckID === truckId);
-  if (!t) return;
-  const cycle = ["Available", "En Route", "Maintenance"];
-  t.Status = cycle[(cycle.indexOf(t.Status) + 1) % cycle.length];
-  t.LastUpdated = new Date().toLocaleString("en-GB");
-  renderTruckTable(_allTrucks);
-  renderDashTrucks(appData.trucks);
-  renderMetrics(appData.farmers, appData.trucks, appData.dispatches);
-  showToast(`${truckId} → ${t.Status}`);
-}
-
-// ── SIMULATE DISPATCH (demo button) ──────────────────────────
-// Creates a fake dispatch record for testing.
-// In production this button can be replaced by a "Force dispatch"
-// that calls triggerMakeDispatch() to fire the real Make.com flow.
-
-async function simulateDispatch() {
-  const farmers = appData.farmers;
-  const avail   = appData.trucks.filter(t => t.Status === "Available");
-  if (!farmers.length || !avail.length) {
-    showToast("No available trucks or farmers to simulate", true); return;
-  }
-  const f  = farmers[Math.floor(Math.random() * farmers.length)];
-  const t  = avail[0];
-  t.Status = "En Route";
-  const now = new Date();
-  const entry = {
-    Date: now.toISOString().slice(0,10),
-    Time: now.toTimeString().slice(0,5),
-    Farmer: f.Name, Village: f.Village,
-    WeightKG: 200 + Math.floor(Math.random() * 800),
-    Driver: t.DriverName, TruckID: t.TruckID,
-    DistanceKM: (Math.random() * 80 + 5).toFixed(1)
+function statusClass(status) {
+  const map = {
+    "Available":   "available",
+    "En Route":    "dispatched",   // amber
+    "Maintenance": "unavailable",  // red
+    "AVAILABLE":   "available",
+    "DISPATCHED":  "dispatched",
+    "UNAVAILABLE": "unavailable",
   };
-  appData.dispatches.unshift(entry);
-  _allDispatches = [...appData.dispatches];
-  renderAll();
-  renderDispatchTable(_allDispatches, true);
-  showToast(`Dispatched ${t.TruckID} to ${f.Name}`);
-  await postToSheet("addDispatch", entry);
+  return map[status] || "unavailable";
 }
 
-// ── ADD TRUCK ─────────────────────────────────────────────────
-// Adds to local state immediately, then writes through to the
-// Trucks tab via the Apps Script endpoint (see Code.gs). The write
-// now carries the logged-in user's Supabase access token (added in
-// postToSheet, js/data.js) so Code.gs can verify their role before
-// honoring it. If SHEETS.WRITE_URL isn't configured yet, the truck
-// still shows up in this session but won't survive a refresh.
-
-async function addTruck() {
-  const get = id => document.getElementById(id)?.value.trim();
-  const id   = get("f-truckId");
-  const name = get("f-driverName");
-  const ph   = get("f-driverPhone");
-  if (!id || !name || !ph) { showToast("Fill in required fields", true); return; }
-
-  const truck = {
-    TruckID: id, DriverName: name, Phone: ph,
-    Status:  document.getElementById("f-truckStatus")?.value || "Available",
-    Lat:     parseFloat(get("f-truckLat")) || window.CONFIG?.APP?.MAP_CENTER_LAT || 10.0,
-    Lon:     parseFloat(get("f-truckLon")) || window.CONFIG?.APP?.MAP_CENTER_LON || -8.0,
-    LastUpdated: new Date().toLocaleString("en-GB")
-  };
-  appData.trucks.push(truck);
-  _allTrucks = [...appData.trucks];
-  closeModal("addTruck");
-  renderTruckTable(_allTrucks);
-  renderMetrics(appData.farmers, appData.trucks, appData.dispatches);
-
-  const saved = await postToSheet("addTruck", truck);
-  showToast(saved ? `Truck ${id} added and synced to Sheets` : `Truck ${id} added (local only — set WRITE_URL to sync)`);
-
-  // Clear form
-  ["f-truckId","f-driverName","f-driverPhone","f-truckLat","f-truckLon"].forEach(i => {
-    const el = document.getElementById(i); if (el) el.value = "";
-  });
+function statusBadge(status) {
+  const cls = statusClass(status);
+  return `<span class="badge ${cls}">${status}</span>`;
 }
 
-// ── ADD FARMER ────────────────────────────────────────────────
-async function addFarmer() {
-  const get = id => document.getElementById(id)?.value.trim();
-  const name    = get("f-farmerName");
-  const phone   = get("f-farmerPhone");
-  const village = get("f-farmerVillage");
-  if (!name || !phone) { showToast("Fill in required fields", true); return; }
+// ── TWILIO SMS SENDER (now relayed through Apps Script) ────────
+// Called when a manual dispatch is triggered from the dashboard.
+//
+// This used to call api.twilio.com directly from the browser, which
+// meant your Twilio Auth Token was visible to anyone with DevTools
+// open. It now POSTs to your own Apps Script endpoint (Code.gs)
+// instead, which holds the real Twilio credentials in its Script
+// Properties (never sent to any browser) and relays the send.
+// Code.gs also checks the caller's Supabase role before sending —
+// see guardedSendSms() / verifyRole() there.
+//
+// Unlike postToSheet(), this can't use mode:"no-cors" — we need to
+// read back whether the send actually succeeded, and Apps Script's
+// doPost responses do carry the CORS headers needed for that.
 
-  const farmer = {
-    Name: name, Phone: phone, Village: village || "—",
-    Lat: parseFloat(get("f-farmerLat")) || window.CONFIG?.APP?.MAP_CENTER_LAT || 10.0,
-    Lon: parseFloat(get("f-farmerLon")) || window.CONFIG?.APP?.MAP_CENTER_LON || -8.0,
-    Registered: new Date().toISOString().slice(0,10)
-  };
-  appData.farmers.push(farmer);
-  _allFarmers = [...appData.farmers];
-  closeModal("addFarmer");
-  renderFarmerTable(_allFarmers);
-  renderMetrics(appData.farmers, appData.trucks, appData.dispatches);
-
-  const saved = await postToSheet("addFarmer", farmer);
-  showToast(saved ? `Farmer ${name} registered and synced to Sheets` : `Farmer ${name} registered (local only — set WRITE_URL to sync)`);
-
-  ["f-farmerName","f-farmerPhone","f-farmerVillage","f-farmerLat","f-farmerLon"].forEach(i => {
-    const el = document.getElementById(i); if (el) el.value = "";
-  });
-}
-
-// ── SMS INTAKE ACTIONS ───────────────────────────────────────
-// These operate on _allRequests (built by buildRequestQueue in
-// intake.js) and mirror the GreenEarth Connect flow: a farmer's raw
-// SMS becomes a structured request, ops confirms it (registering a
-// new farmer if needed), then assigns a truck to turn it into a
-// real dispatch. Skips WhatsApp/app-based intake entirely — SMS in,
-// structured data out, same as the rest of this dashboard.
-
-function loadIntakeExample() {
-  const el = document.getElementById("intakeText");
-  if (el) el.value = "KWAME - RED OIL - 200L - AJUMAKO";
-}
-
-function ingestMessages() {
-  const el = document.getElementById("intakeText");
-  const lines = (el?.value || "").split("\n").map(l => l.trim()).filter(Boolean);
-  if (!lines.length) { showToast("Paste at least one message", true); return; }
-
-  const now = new Date();
-  const stamp = `${now.toISOString().slice(0,10)} ${now.toTimeString().slice(0,5)}`;
-  lines.forEach(line => {
-    appData.requests.push({ Phone: "SMS-IN", Raw: line, ReceivedAt: stamp });
-  });
-
-  _allRequests = buildRequestQueue(appData.requests, appData.farmers, _allRequests);
-  renderRequestsTable(_allRequests, appData.trucks);
-  updateRequestsBadge(_allRequests);
-  el.value = "";
-  showToast(`${lines.length} message${lines.length > 1 ? "s" : ""} ingested`);
-}
-
-// Demo button — simulates a farmer texting in, using either a known
-// farmer's phone (tests the "already registered" path) or a new one.
-function simulateIncomingSMS() {
-  const products = ["Red Oil", "Maize", "Cassava", "Millet", "Cocoa", "Rice"];
-  const useKnown = appData.farmers.length && Math.random() > 0.4;
-  const farmer = useKnown ? appData.farmers[Math.floor(Math.random() * appData.farmers.length)] : null;
-  const name = farmer ? farmer.Name.split(" ")[0] : ["Yaw","Adama","Salimata","Boubacar"][Math.floor(Math.random()*4)];
-  const phone = farmer ? farmer.Phone : `+233 24 000 ${Math.floor(1000 + Math.random()*8999)}`;
-  const village = farmer ? farmer.Village : ["Techiman","Ho","Sunyani"][Math.floor(Math.random()*3)];
-  const product = products[Math.floor(Math.random() * products.length)];
-  const qty = 50 + Math.floor(Math.random() * 450);
-  const raw = `${name.toUpperCase()} - ${product.toUpperCase()} - ${qty}KG - ${village.toUpperCase()}`;
-
-  const now = new Date();
-  appData.requests.push({
-    Phone: phone, Raw: raw,
-    ReceivedAt: `${now.toISOString().slice(0,10)} ${now.toTimeString().slice(0,5)}`
-  });
-  _allRequests = buildRequestQueue(appData.requests, appData.farmers, _allRequests);
-  renderRequestsTable(_allRequests, appData.trucks);
-  updateRequestsBadge(_allRequests);
-  showToast(`Incoming SMS from ${phone}`);
-}
-
-// Confirms a request: registers a new farmer if the phone number
-// wasn't already in the Farmers sheet, then moves the request to
-// "confirmed" so it can be assigned a truck.
-async function confirmRequest(id) {
-  const r = _allRequests.find(x => x.id === id);
-  if (!r) return;
-
-  if (!r.farmerKnown) {
-    const farmer = {
-      Name: r.fields.name || "Unknown",
-      Phone: r.phone,
-      Village: r.fields.location || "—",
-      Lat: (window.CONFIG?.APP?.MAP_CENTER_LAT || 10.0) + (Math.random() - 0.5) * 2,
-      Lon: (window.CONFIG?.APP?.MAP_CENTER_LON || -8.0) + (Math.random() - 0.5) * 2,
-      Registered: new Date().toISOString().slice(0, 10),
-    };
-    appData.farmers.push(farmer);
-    _allFarmers = [...appData.farmers];
-    r.farmerKnown = true;
-    r.farmerName = farmer.Name;
-    renderFarmerTable(_allFarmers);
-    renderMetrics(appData.farmers, appData.trucks, appData.dispatches);
-    await postToSheet("addFarmer", farmer);
+async function sendSMS(toNumber, message) {
+  const url = window.CONFIG?.SHEETS?.WRITE_URL;
+  if (!url) return { ok: false, reason: "WRITE_URL not configured" };
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "sendSms",
+        payload: { to: toNumber, body: message },
+        accessToken: getAccessToken(),
+      }),
+    });
+    return await resp.json();
+  } catch (err) {
+    return { ok: false, reason: err.message };
   }
-
-  r.status = "confirmed";
-  renderRequestsTable(_allRequests, appData.trucks);
-  updateRequestsBadge(_allRequests);
-  showToast(`${r.farmerName} confirmed, awaiting truck`);
 }
 
-function discardRequest(id) {
-  const r = _allRequests.find(x => x.id === id);
-  if (r) appData.requests = appData.requests.filter(x => !(x.Raw === r.raw && x.Phone === r.phone));
-  _allRequests = _allRequests.filter(x => x.id !== id);
-  renderRequestsTable(_allRequests, appData.trucks);
-  updateRequestsBadge(_allRequests);
-  showToast("Request discarded");
-}
+// ── MAKE.COM WEBHOOK TRIGGER ──────────────────────────────────
+// Fires the Make.com dispatch scenario when a manual dispatch
+// is triggered from the dashboard (as a backup / override).
+//
+// HOW TO ENABLE:
+//   Paste your Make.com webhook URL into MAKE.WEBHOOK_URL in config.js
+//   Make.com will then run the full SMS dispatch automatically.
 
-// Turns a confirmed request into a real dispatch record, same shape
-// as simulateDispatch() produces, and marks the truck En Route.
-async function dispatchRequest(id, truckId) {
-  const r = _allRequests.find(x => x.id === id);
-  const t = appData.trucks.find(x => x.TruckID === truckId);
-  if (!r || r.status !== "confirmed") return;
-  if (!t) { showToast("Choose a truck first", true); return; }
-
-  t.Status = "En Route";
-  const now = new Date();
-  const dispatch = {
-    Date: now.toISOString().slice(0, 10),
-    Time: now.toTimeString().slice(0, 5),
-    Farmer: r.farmerName,
-    Village: r.fields.location,
-    WeightKG: r.fields.quantity || 0,
-    Driver: t.DriverName,
-    TruckID: t.TruckID,
-    DistanceKM: (Math.random() * 80 + 5).toFixed(1),
-  };
-  appData.dispatches.unshift(dispatch);
-  _allDispatches = [...appData.dispatches];
-  r.status = "dispatched";
-
-  renderAll();
-  renderDispatchTable(_allDispatches, true);
-  renderTruckTable(_allTrucks);
-  renderRequestsTable(_allRequests, appData.trucks);
-  showToast(`${t.TruckID} dispatched to ${r.farmerName}`);
-
-  await postToSheet("addDispatch", dispatch);
-}
-
-// ── MODAL HELPERS ─────────────────────────────────────────────
-function openModal(id)  { document.getElementById("modal-" + id)?.classList.add("open"); }
-function closeModal(id) { document.getElementById("modal-" + id)?.classList.remove("open"); }
-
-// ── TOAST ─────────────────────────────────────────────────────
-let toastTimer;
-function showToast(msg, isError = false) {
-  const t = document.getElementById("toast");
-  t.textContent = msg;
-  t.classList.toggle("toast-error", isError);
-  t.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), 3000);
+async function triggerMakeDispatch(payload) {
+  const url = window.CONFIG?.MAKE?.WEBHOOK_URL;
+  if (!url) {
+    console.warn("[AgriHaul] Make.com webhook not configured. Add URL to config.js.");
+    return false;
+  }
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    return true;
+  } catch (err) {
+    console.warn("[AgriHaul] Make.com webhook failed:", err.message);
+    return false;
+  }
 }
