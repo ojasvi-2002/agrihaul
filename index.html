@@ -22,7 +22,9 @@
 
 <!-- ============================================================
      LOGIN SCREEN — Farm/grass aesthetic with dark+light themes
-     Credentials: js/config.js → APP.DEMO_USERNAME / APP.DEMO_PASSWORD
+     Auth is handled by Supabase (js/auth.js). Three sign-in modes:
+     password, magic link, and email OTP — see setLoginMode() in
+     app.js. No more hardcoded demo credentials in config.js.
      ============================================================ -->
 <div id="loginScreen">
   <button class="login-theme-btn" id="loginThemeBtn" onclick="toggleTheme()" title="Toggle dark/light mode">☀</button>
@@ -62,20 +64,39 @@
       <div class="particle" style="--x:91%;--d:1.7s;--s:2px"></div>
     </div>
   </div>
+
   <div class="login-card">
     <div class="login-leaf" aria-hidden="true">🌿</div>
     <div class="login-logo">AgriHaul</div>
     <div class="login-tagline">Operations Portal</div>
-    <div class="login-field">
-      <label>Username</label>
-      <input type="text" id="loginUser" placeholder="admin" autocomplete="username">
+
+    <!-- Sign-in mode tabs — clicking these calls setLoginMode() in app.js,
+         which shows/hides the password field vs the OTP field below. -->
+    <div class="login-tabs" style="display:flex;gap:6px;margin-bottom:18px">
+      <button class="btn btn-ghost btn-sm" onclick="setLoginMode('password')" id="tab-password">Password</button>
+      <button class="btn btn-ghost btn-sm" onclick="setLoginMode('magiclink')" id="tab-magiclink">Magic link</button>
+      <button class="btn btn-ghost btn-sm" onclick="setLoginMode('otp')" id="tab-otp">Email code</button>
     </div>
+
     <div class="login-field">
+      <label>Email</label>
+      <input type="email" id="loginEmail" placeholder="you@company.com" autocomplete="username">
+    </div>
+
+    <!-- Shown for "password" mode, hidden for magic link / OTP -->
+    <div class="login-field" id="loginPassField">
       <label>Password</label>
       <input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password">
     </div>
+
+    <!-- Shown only after requesting an email code, in "otp" mode -->
+    <div class="login-field" id="loginOtpField" style="display:none">
+      <label>6-digit code</label>
+      <input type="text" id="loginOtp" placeholder="123456" inputmode="numeric" maxlength="6">
+    </div>
+
     <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign in →</button>
-    <p class="login-note">Demo: admin / agrihaulops2024</p>
+    <p class="login-note" id="loginStatus">New here? <a href="#" onclick="doSignUp();return false;">Create an account</a></p>
   </div>
 </div>
 
@@ -94,7 +115,8 @@
       AgriHaul
     </div>
     <div class="topbar-divider"></div>
-    <!-- Client name comes from CONFIG.APP.CLIENT_NAME -->
+    <!-- Client name comes from CONFIG.APP.CLIENT_NAME, or the logged-in
+         user's client_name from their Supabase profile if set. -->
     <div class="topbar-client" id="clientLabel">—</div>
 
     <div class="topbar-right">
@@ -109,6 +131,8 @@
   </header>
 
   <!-- ── SIDEBAR NAV ─────────────────────────────────────── -->
+  <!-- Items are shown/hidden per-role by applyRolePermissions() in
+       app.js, based on the ROLE_PAGES map in js/auth.js. -->
   <nav class="sidebar">
     <div class="nav-section-label">Monitor</div>
 
@@ -435,9 +459,10 @@
 
 <!-- ============================================================
      MODAL: ADD TRUCK
-     Adds to local state. To persist, add a Google Sheets API
-     write call in addTruck() in app.js, or have ops staff
-     add rows directly to the Google Sheet.
+     Adds to local state, then writes through to the Trucks tab via
+     the Apps Script endpoint (Code.gs), carrying the logged-in
+     user's Supabase access token so the write can be role-checked
+     server-side. See addTruck() in app.js / postToSheet() in data.js.
      ============================================================ -->
 <div class="modal-overlay" id="modal-addTruck">
   <div class="modal">
@@ -528,20 +553,30 @@
 
 <!-- ============================================================
      SCRIPTS — load order matters:
-     1. config.js   — must be first (CONFIG object)
-     2. data.js     — uses CONFIG, exports loadAllData / sendSMS
-     3. map.js      — uses statusClass from data.js
-     4. tables.js   — uses statusBadge from data.js
-     5. app.js      — uses everything above
+     0. supabase-js CDN — must load before auth.js, which uses it
+     1. config.js   — must be first of your own files (CONFIG object)
+     2. auth.js     — Supabase login + RBAC, used by app.js
+     3. data.js     — uses CONFIG, exports loadAllData / sendSMS
+     4. map.js      — uses statusClass from data.js
+     5. tables.js   — uses statusBadge from data.js
+     6. app.js      — uses everything above
 
      TO CONNECT GOOGLE SHEETS:
        Edit js/config.js → SHEETS.FARMERS_URL / TRUCKS_URL / DISPATCH_URL
 
      TO ENABLE SMS:
-       Edit js/config.js → TWILIO keys
+       Twilio keys now live in Apps Script Script Properties (Code.gs),
+       NOT in js/config.js — the dashboard sends SMS by calling
+       SHEETS.WRITE_URL with action "sendSms", which Code.gs relays to
+       Twilio server-side. Nothing Twilio-related belongs in this file
+       or config.js anymore.
 
      TO ENABLE MAKE.COM AUTO-DISPATCH:
        Edit js/config.js → MAKE.WEBHOOK_URL
+
+     TO CONFIGURE LOGIN:
+       Edit js/config.js → SUPABASE.URL / SUPABASE.ANON_KEY
+       (Supabase Dashboard → Settings → API)
      ============================================================ -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/config.js"></script>
