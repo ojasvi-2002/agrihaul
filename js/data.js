@@ -12,6 +12,10 @@
 //   Requests sheet:    Phone, Raw, ReceivedAt (raw inbound SMS log, parsed
 //                       client-side in intake.js — see that file for the
 //                       NAME - PRODUCT - QUANTITY - LOCATION format)
+//   Broadcasts sheet:  SentAt, Message, RecipientCount, FailedCount, SentBy
+//                       (outbound messages ops sends to farmers — see
+//                       js/app.js sendBroadcastConfirmed() and
+//                       Code.gs sendBroadcastViaTwilio())
 //
 // FIXED IN THIS AUDIT:
 //   - parseCSV() no longer auto-converts every numeric-looking cell to a
@@ -64,6 +68,12 @@ const SEED_DISPATCH = [
   { Date:"2025-05-22", Time:"09:05", Farmer:"Mariama Balde", Village:"Conakry", WeightKG:190, Driver:"Suleiman Diallo",  TruckID:"TRK-008", DistanceKM:55.0 },
 ];
 
+// No seed history for broadcasts — the "Recent broadcasts" table
+// starts empty until you send one. If you publish a Broadcasts tab
+// to CSV and set SHEETS.BROADCASTS_URL, past sends will read back in
+// on refresh too (see loadAllData() below).
+const SEED_BROADCASTS = [];
+
 // ── CSV PARSER ───────────────────────────────────────────────
 // Parses raw CSV text (from Google Sheets publish URL) into
 // an array of objects, using the first row as keys.
@@ -77,7 +87,7 @@ const SEED_DISPATCH = [
 // normalizePhone(p) — which calls String.prototype.replace on the
 // assumption p is a string — would throw a TypeError and quietly
 // break farmer matching for that row.
-const NUMERIC_FIELDS = new Set(["Lat", "Lon", "WeightKG", "DistanceKM"]);
+const NUMERIC_FIELDS = new Set(["Lat", "Lon", "WeightKG", "DistanceKM", "RecipientCount", "FailedCount"]);
 
 function parseCSV(text) {
   const lines = text.trim().split("\n");
@@ -154,6 +164,11 @@ async function fetchSheet(url, seedData) {
 // deleteFromSheet() below. Content-Type stays "text/plain" so the
 // request remains a CORS "simple request" (no preflight OPTIONS,
 // which Apps Script web apps don't support).
+//
+// Also used for the "sendBroadcast" action (js/app.js
+// sendBroadcastConfirmed()) — same endpoint, same accessToken-carrying
+// request, Code.gs just loops Twilio sends instead of appending a row
+// directly.
 async function postToSheet(action, payload) {
   const url = window.CONFIG?.SHEETS?.WRITE_URL;
   if (!url) {
@@ -202,16 +217,18 @@ async function deleteFromSheet(action, payload) {
 
 // ── MAIN DATA LOAD ───────────────────────────────────────────
 // Called on page load and every REFRESH_INTERVAL milliseconds.
-// Returns { farmers, trucks, dispatches, requests } — all normalised.
+// Returns { farmers, trucks, dispatches, requests, broadcasts } —
+// all normalised.
 
 async function loadAllData() {
   const cfg = window.CONFIG?.SHEETS || {};
 
-  const [farmers, trucks, dispatches, requests] = await Promise.all([
-    fetchSheet(cfg.FARMERS_URL,  SEED_FARMERS),
-    fetchSheet(cfg.TRUCKS_URL,   SEED_TRUCKS),
-    fetchSheet(cfg.DISPATCH_URL, SEED_DISPATCH),
-    fetchSheet(cfg.REQUESTS_URL, SEED_REQUESTS),
+  const [farmers, trucks, dispatches, requests, broadcasts] = await Promise.all([
+    fetchSheet(cfg.FARMERS_URL,    SEED_FARMERS),
+    fetchSheet(cfg.TRUCKS_URL,     SEED_TRUCKS),
+    fetchSheet(cfg.DISPATCH_URL,   SEED_DISPATCH),
+    fetchSheet(cfg.REQUESTS_URL,   SEED_REQUESTS),
+    fetchSheet(cfg.BROADCASTS_URL, SEED_BROADCASTS),
   ]);
 
   // Normalise status values from your sheet
@@ -228,7 +245,7 @@ async function loadAllData() {
     return db - da;
   });
 
-  return { farmers, trucks, dispatches, requests };
+  return { farmers, trucks, dispatches, requests, broadcasts };
 }
 
 // ── STATUS BADGE HELPER ──────────────────────────────────────
