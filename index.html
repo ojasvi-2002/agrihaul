@@ -209,6 +209,18 @@
       Farmers
     </div>
 
+    <!-- NEW: step 1 of the outbound flow — ops messages farmers
+         before any of them have texted in. Same role gate as the
+         other write actions (dispatcher/admin/super_admin); Code.gs
+         re-checks this server-side before anything actually sends. -->
+    <div class="nav-item" data-page="broadcast" onclick="showPage('broadcast', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+        <path d="M3 11l18-6v14L3 13z"/>
+        <path d="M11 15l1 5a2 2 0 0 1-4 0l-.5-4"/>
+      </svg>
+      Broadcast
+    </div>
+
     <!-- Only rendered visible for role === 'super_admin' (applyRolePermissions()
          in app.js hides any data-page not in ROLE_PAGES[currentRole]). -->
     <div class="nav-section-label">Admin</div>
@@ -485,6 +497,80 @@
 
 
     <!-- ================================================== -->
+    <!--  PAGE: BROADCAST                                   -->
+    <!--  Step 1 of the "Working" flow: ops sends a message  -->
+    <!--  to farmers asking what they have ready to sell,    -->
+    <!--  before farmers reply with their own NAME-PRODUCT-  -->
+    <!--  QUANTITY-LOCATION message (see the Requests page).  -->
+    <!--  Sends via Code.gs → sendBroadcast → Twilio, looping -->
+    <!--  once per selected farmer's phone number.            -->
+    <!-- ================================================== -->
+    <div class="page" id="page-broadcast">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Broadcast</div>
+          <div class="page-subtitle">Message farmers first · e.g. "we're buying this week"</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <!-- Recipient picker -->
+        <div>
+          <div class="section-head">
+            <div class="section-title">Recipients</div>
+            <div class="section-rule"></div>
+          </div>
+          <div class="table-card" style="padding:14px">
+            <div class="search-row" style="margin-bottom:10px">
+              <input class="search-input" type="text" id="broadcastRecipientSearch"
+                placeholder="Search name, village, phone…"
+                oninput="filterBroadcastRecipients()">
+            </div>
+            <div class="form-actions" style="margin-bottom:10px">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer">
+                <input type="checkbox" checked onchange="toggleBroadcastAll(this.checked)"> Select all shown
+              </label>
+            </div>
+            <div id="broadcastRecipientList" style="max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:2px"></div>
+          </div>
+        </div>
+
+        <!-- Composer -->
+        <div>
+          <div class="section-head">
+            <div class="section-title">Message</div>
+            <div class="section-rule"></div>
+          </div>
+          <div class="table-card" style="padding:16px">
+            <textarea id="broadcastMessage" class="form-input" rows="6" style="width:100%; resize:vertical; font-family:var(--font-mono); font-size:12px;"
+              placeholder="Hi! AgriHaul here — we're buying this week. Reply: NAME - PRODUCT - QUANTITY - LOCATION"
+              oninput="updateBroadcastCharCount()"></textarea>
+            <div class="form-hint" id="broadcastCharCount" style="margin:6px 0 16px">0 chars · 1 SMS segment</div>
+            <div class="form-actions" style="flex-wrap:wrap">
+              <button class="btn btn-ghost" onclick="insertBroadcastTemplate()">Use template</button>
+              <button class="btn btn-primary" id="broadcastSendBtn" onclick="requestSendBroadcast()" disabled>
+                Send to <span id="broadcastRecipientCount">0</span> farmers
+              </button>
+            </div>
+            <div class="form-hint" style="margin-top:12px">Sends one SMS per selected farmer via Twilio, relayed through Code.gs — your Twilio credentials never touch the browser.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">Recent broadcasts</div>
+        <div class="section-rule"></div>
+      </div>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Sent</th><th>Message</th><th>Recipients</th><th>Sent by</th></tr></thead>
+          <tbody id="broadcastHistoryTable"></tbody>
+        </table>
+      </div>
+    </div><!-- /broadcast -->
+
+
+    <!-- ================================================== -->
     <!--  PAGE: USERS  (super_admin only)                   -->
     <!--  Add/remove teammates and change their role. Talks -->
     <!--  to Code.gs (listUsers/inviteUser/updateUserRole/  -->
@@ -641,6 +727,33 @@
   </div>
 </div>
 
+<!-- ============================================================
+     MODAL: CONFIRM BROADCAST
+     A broadcast fans out real SMS to potentially dozens of farmers
+     at once with no per-recipient "are you sure" — unlike a single
+     dispatch, there's no cheap undo, so this confirms the recipient
+     count + exact message before Code.gs starts looping Twilio sends.
+     ============================================================ -->
+<div class="modal-overlay" id="modal-confirmBroadcast">
+  <div class="modal" style="width:460px">
+    <div class="modal-header">
+      <div class="modal-title">Send broadcast?</div>
+      <button class="modal-close" onclick="closeModal('confirmBroadcast')">✕</button>
+    </div>
+    <p style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-bottom:14px">
+      This sends a real SMS to <strong id="confirmBroadcastCount">0</strong> farmers right now. This can't be undone.
+    </p>
+    <div class="table-card" style="padding:12px;margin-bottom:18px;background:var(--bg-raised)">
+      <div class="form-hint" style="margin-bottom:4px">Message preview</div>
+      <div id="confirmBroadcastPreview" style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" id="confirmBroadcastBtn" onclick="sendBroadcastConfirmed()">Send now</button>
+      <button class="btn btn-ghost" onclick="closeModal('confirmBroadcast')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast notification -->
 <div class="toast" id="toast"></div>
 
@@ -658,12 +771,14 @@
 
      TO CONNECT GOOGLE SHEETS:
        Edit js/config.js → SHEETS.FARMERS_URL / TRUCKS_URL / DISPATCH_URL
+       (and optionally BROADCASTS_URL, if you want sent broadcasts to
+       persist across refreshes — see js/data.js)
 
      TO ENABLE SMS:
        Twilio keys live in Apps Script Script Properties (Code.gs),
        NOT in js/config.js — the dashboard sends SMS by calling
-       SHEETS.WRITE_URL with action "sendSms", which Code.gs relays to
-       Twilio server-side.
+       SHEETS.WRITE_URL with action "sendSms" (or "sendBroadcast" for
+       the Broadcast page), which Code.gs relays to Twilio server-side.
 
      TO ENABLE MAKE.COM AUTO-DISPATCH:
        Edit js/config.js → MAKE.WEBHOOK_URL
