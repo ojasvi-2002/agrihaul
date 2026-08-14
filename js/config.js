@@ -34,7 +34,7 @@ const CONFIG = {
     TRUCKS_URL:   "https://docs.google.com/spreadsheets/d/e/2PACX-1vS04npHKh8W2xK__jdma05uL2u5fl_kibym53xsjW_bp6Ks-Suu331MSBad65rKcw/pub?gid=259795644&single=true&output=csv",
 
     DISPATCH_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vS04npHKh8W2xK__jdma05uL2u5fl_kibym53xsjW_bp6Ks-Suu331MSBad65rKcw/pub?gid=1029290634&single=true&output=csv",
-
+    BROADCASTS_URL: "https://docs.google.com/spreadsheets/d/1a5Bl6IlLglRWToeBQCyurNY3EPe_DQEr/edit?gid=426736020#gid=426736020",
     REQUESTS_URL: "",   // still needs a Requests tab — let me know if you want to set that up now
 
     WRITE_URL:    "https://script.google.com/macros/s/AKfycbxGuRo0lgVKuTb1gE1_ALBt8kUHNsljDq1FUmILOMxlpP_4kq3-Xjhgpl3kGXU5FBNrSg/exec",
