@@ -546,6 +546,7 @@ td.mono    { font-family: var(--font-mono); font-size: 12px; }
   font-weight: 700;
 }
 .btn-primary:hover { filter: brightness(1.1); box-shadow: 0 0 12px var(--accent-glow); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; filter: none; }
 .btn-ghost {
   background: transparent;
   border-color: var(--border-default);
@@ -1055,4 +1056,34 @@ td.mono    { font-family: var(--font-mono); font-size: 12px; }
   margin-top: 14px;
   font-family: var(--font-mono);
   text-align: center;
+}
+
+/* ============================================================
+   BROADCAST PAGE — recipient checklist rows
+   Used by renderBroadcastRecipients() in js/tables.js.
+   ============================================================ */
+.broadcast-recipient-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.broadcast-recipient-row:hover { background: var(--bg-hover); }
+.broadcast-recipient-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px; height: 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.broadcast-recipient-row .primary { flex-shrink: 0; }
+.broadcast-recipient-row .form-hint {
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
