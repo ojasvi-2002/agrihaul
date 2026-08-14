@@ -1,5 +1,5 @@
 // ============================================================
-// js/auth.js  —  Authentication + RBAC (Supabase-backed)
+// js/auth.js  —  Authentication + RBAC (Supabase-backed) new
 // ============================================================
 // Load order: config.js → auth.js → data.js → intake.js → map.js →
 // tables.js → app.js. Requires the Supabase JS CDN tag in index.html
