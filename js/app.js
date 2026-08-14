@@ -22,6 +22,16 @@
 //   were actually in index.html, not here — see that file's comments.
 //   enterSignupView()/enterSigninView()/handleAuthSubmit() below were
 //   already correct; they just had nothing to attach to before.
+//
+// ADDED: the Broadcast page — step 1 of the outbound flow. Ops
+// composes a message, picks (or edits) a list of farmers, and sends
+// it via SMS *before* any farmer has texted in — see
+// initBroadcastPage()/toggleBroadcastRecipient()/
+// sendBroadcastConfirmed() below. Recipient selection lives here in
+// _broadcastSelected (a Set of phone numbers) so it survives
+// re-renders (search, auto-refresh) within a session; the actual
+// send goes through postToSheet("sendBroadcast", …) → Code.gs →
+// Twilio, same pattern as every other write in this app.
 // ============================================================
 
 // ── APP STATE ────────────────────────────────────────────────
@@ -30,6 +40,7 @@ let _trucks       = [];
 let _dispatches   = [];
 let _rawRequests  = [];
 let _requestQueue = [];
+let _broadcasts   = [];
 
 let _authView  = "signin";   // "signin" | "signup"
 let _loginMode = "password"; // "password" | "magiclink" | "otp"
@@ -369,6 +380,7 @@ function showPage(pageId, navEl) {
   // display:none, so pins must be (re-)placed only once it's visible.
   if (pageId === "map") renderMap(_farmers, _trucks);
   if (pageId === "users") loadUsers();
+  if (pageId === "broadcast") initBroadcastPage();
 }
 
 // ============================================================
@@ -382,6 +394,17 @@ async function loadAndRenderAll() {
   _dispatches  = data.dispatches;
   _rawRequests = data.requests;
   _requestQueue = buildRequestQueue(_rawRequests, _farmers, _requestQueue);
+
+  // Merge, don't overwrite: if SHEETS.BROADCASTS_URL isn't configured
+  // yet, every fetch returns an empty seed array, which would wipe out
+  // any broadcast just sent this session the moment the 30s refresh
+  // ticks. Keep locally-known sends that the fetched list doesn't
+  // already have (matched by SentAt + Message).
+  const fetchedBroadcasts = data.broadcasts || [];
+  const localOnly = _broadcasts.filter(b =>
+    !fetchedBroadcasts.some(fb => fb.SentAt === b.SentAt && fb.Message === b.Message)
+  );
+  _broadcasts = [...localOnly, ...fetchedBroadcasts];
 
   _allFarmers    = _farmers;
   _allTrucks     = _trucks;
@@ -402,6 +425,12 @@ async function loadAndRenderAll() {
   }
   if (document.getElementById("page-users")?.classList.contains("active")) {
     loadUsers();
+  }
+  if (document.getElementById("page-broadcast")?.classList.contains("active")) {
+    // Re-render recipients (new/changed farmers) without touching the
+    // operator's current selection, plus the (possibly merged) history.
+    renderBroadcastRecipients(_farmers, _broadcastSelected);
+    renderBroadcastHistory(_broadcasts);
   }
 }
 
@@ -454,6 +483,9 @@ async function addFarmer() {
   renderFarmerTable(_farmers);
   renderMetrics(_farmers, _trucks, _dispatches);
   renderMap(_farmers, _trucks);
+  // Newly-added farmers default to "selected" for the next broadcast,
+  // same as everyone else the first time the picker renders them.
+  _broadcastSelected.add(phone);
 
   closeModal("addFarmer");
   clearFields(["f-farmerName", "f-farmerPhone", "f-farmerVillage", "f-farmerLat", "f-farmerLon"]);
@@ -580,6 +612,7 @@ async function runConfirmedDelete() {
       if (!result.ok) throw new Error(result.error || "Delete failed");
       _farmers = _farmers.filter(f => normalizePhone(f.Phone) !== normalizePhone(key));
       _allFarmers = _farmers;
+      _broadcastSelected.delete(key);
       renderFarmerTable(_farmers);
       renderMetrics(_farmers, _trucks, _dispatches);
       renderMap(_farmers, _trucks);
@@ -669,6 +702,130 @@ function requestRemoveUser(userId, label) {
   document.getElementById("confirmDeleteBody").textContent =
     `This permanently removes ${label || "this user"}'s account and sign-in access. This can't be undone.`;
   openModal("confirmDelete");
+}
+
+// ============================================================
+// BROADCAST (step 1 of the outbound flow) — compose / pick
+// recipients / send / history
+// ============================================================
+// The flow from your notes: ops sends a message to farmers ("hey we
+// wanna buy XYZ") *before* any farmer has texted in. Farmers replying
+// with their own NAME - PRODUCT - QUANTITY - LOCATION message is the
+// existing Requests page (intake.js already parses that). This page
+// is only the outbound half.
+//
+// Recipient selection is manual, per your note ("operator can update
+// the list") — everyone starts checked, the operator unchecks anyone
+// they don't want this round, and can search to narrow down first.
+
+let _broadcastSelected = new Set(); // phone numbers currently checked
+
+function initBroadcastPage() {
+  // Default to "everyone selected" the first time the page is opened
+  // in a session; after that, re-renders (search, refresh) keep
+  // whatever the operator has already picked.
+  if (_broadcastSelected.size === 0 && _farmers.length) {
+    _farmers.forEach(f => _broadcastSelected.add(f.Phone));
+  }
+  const searchEl = document.getElementById("broadcastRecipientSearch");
+  if (searchEl) searchEl.value = "";
+  renderBroadcastRecipients(_farmers, _broadcastSelected);
+  renderBroadcastHistory(_broadcasts);
+  updateBroadcastCharCount();
+  updateBroadcastCount();
+}
+
+function toggleBroadcastRecipient(phone, checked) {
+  if (checked) _broadcastSelected.add(phone);
+  else _broadcastSelected.delete(phone);
+  updateBroadcastCount();
+}
+
+// Selects/deselects only the farmers currently visible (i.e. matching
+// the search box), so narrowing down first and then "select all" lets
+// an operator target a subset (e.g. one village) without hand-picking.
+function toggleBroadcastAll(checked) {
+  _broadcastFarmers.forEach(f => {
+    if (checked) _broadcastSelected.add(f.Phone);
+    else _broadcastSelected.delete(f.Phone);
+  });
+  renderBroadcastRecipients(_broadcastFarmers, _broadcastSelected);
+  updateBroadcastCount();
+}
+
+function updateBroadcastCount() {
+  setEl("broadcastRecipientCount", _broadcastSelected.size);
+  const btn = document.getElementById("broadcastSendBtn");
+  if (btn) btn.disabled = _broadcastSelected.size === 0;
+}
+
+function insertBroadcastTemplate() {
+  const el = document.getElementById("broadcastMessage");
+  if (el) el.value = "Hi! AgriHaul here — we're buying produce this week. Reply with what you have ready: NAME - PRODUCT - QUANTITY - LOCATION";
+  updateBroadcastCharCount();
+}
+
+// SMS is billed/split in 160-character segments (GSM-7) — surfacing
+// this helps the operator keep the message to one segment on purpose,
+// not by accident.
+function updateBroadcastCharCount() {
+  const el = document.getElementById("broadcastMessage");
+  const counter = document.getElementById("broadcastCharCount");
+  if (!el || !counter) return;
+  const len = el.value.length;
+  const segments = len === 0 ? 1 : Math.max(1, Math.ceil(len / 160));
+  counter.textContent = `${len} chars · ${segments} SMS segment${segments === 1 ? "" : "s"}`;
+}
+
+function requestSendBroadcast() {
+  const message = (document.getElementById("broadcastMessage")?.value || "").trim();
+  if (!message) { showToast("Write a message first.", true); return; }
+  if (_broadcastSelected.size === 0) { showToast("Select at least one recipient.", true); return; }
+
+  document.getElementById("confirmBroadcastCount").textContent = _broadcastSelected.size;
+  document.getElementById("confirmBroadcastPreview").textContent = message;
+  openModal("confirmBroadcast");
+}
+
+async function sendBroadcastConfirmed() {
+  const message = (document.getElementById("broadcastMessage")?.value || "").trim();
+  const recipients = Array.from(_broadcastSelected);
+  const btn = document.getElementById("confirmBroadcastBtn");
+  const originalLabel = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+
+  try {
+    const result = await postToSheet("sendBroadcast", { message, recipients });
+    if (!result.ok) throw new Error(result.error || "Broadcast failed");
+
+    _broadcasts.unshift({
+      SentAt: new Date().toISOString(),
+      Message: message,
+      RecipientCount: result.sent,
+      FailedCount: result.failed,
+      SentBy: currentProfile()?.email || "",
+    });
+    renderBroadcastHistory(_broadcasts);
+
+    closeModal("confirmBroadcast");
+    const el = document.getElementById("broadcastMessage");
+    if (el) el.value = "";
+    updateBroadcastCharCount();
+
+    showToast(
+      result.failed
+        ? `Sent to ${result.sent} farmers — ${result.failed} failed to deliver.`
+        : `Sent to ${result.sent} farmers.`,
+      !!result.failed
+    );
+  } catch (err) {
+    showToast(`Couldn't send broadcast: ${err.message}`, true);
+    // Leave the modal open, same reasoning as runConfirmedDelete() —
+    // let the operator see the error and retry rather than assuming
+    // it went out.
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+  }
 }
 
 // ============================================================
