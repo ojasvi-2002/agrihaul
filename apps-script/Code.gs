@@ -21,14 +21,21 @@
  *
  * Also added: deleteFarmer/deleteTruck (previously unhandled, so
  * Delete never reached the Sheet), sendSms (previously unhandled, so
- * the manual "Send SMS" action always failed), and listUsers /
- * inviteUser / updateUserRole / removeUser for the super_admin
- * "Users" page.
+ * the manual "Send SMS" action always failed), listUsers / inviteUser /
+ * updateUserRole / removeUser for the super_admin "Users" page, and
+ * sendBroadcast — step 1 of the outbound flow: ops picks a list of
+ * farmers and sends them all a message ("we're buying this week"),
+ * *before* any farmer has texted in. See sendBroadcastViaTwilio()
+ * below.
  *
  * SETUP
  * 1. Open your spreadsheet → Extensions → Apps Script
  * 2. Delete any starter code, paste this file in
- * 3. Project Settings (gear icon) → Script Properties → add:
+ * 3. Add a "Broadcasts" tab to the spreadsheet with header row:
+ *      SentAt | Message | RecipientCount | FailedCount | SentBy
+ *    (only needed if you want the "Recent broadcasts" table on the
+ *    dashboard to persist across refreshes — see js/data.js)
+ * 4. Project Settings (gear icon) → Script Properties → add:
  *      SUPABASE_URL              e.g. https://xxxx.supabase.co
  *      SUPABASE_ANON_KEY         Settings → API → anon/public key
  *      SUPABASE_SERVICE_ROLE_KEY Settings → API → service_role key
@@ -36,11 +43,12 @@
  *                                 manage users; it never touches the
  *                                 browser, only lives here)
  *      TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER
- *                                 (optional — only needed for "Send SMS")
- * 4. Deploy → New deployment → type: Web app
+ *                                 (optional — only needed for "Send SMS"
+ *                                 and Broadcast)
+ * 5. Deploy → New deployment → type: Web app
  *      Execute as:      Me
  *      Who has access:  Anyone
- * 5. Copy the Web app URL it gives you, paste into SHEETS.WRITE_URL
+ * 6. Copy the Web app URL it gives you, paste into SHEETS.WRITE_URL
  *    in js/config.js
  *
  * Every time you edit this script you need to create a new deployment
@@ -53,6 +61,7 @@ const SHEET_COLUMNS = {
   Trucks:      ["TruckID", "DriverName", "Phone", "Status", "Lat", "Lon", "LastUpdated"],
   DispatchLog: ["Date", "Time", "Farmer", "Village", "WeightKG", "Driver", "TruckID", "DistanceKM"],
   Requests:    ["Phone", "Raw", "ReceivedAt"],
+  Broadcasts:  ["SentAt", "Message", "RecipientCount", "FailedCount", "SentBy"],
 };
 
 const ACTION_TO_SHEET = {
@@ -64,7 +73,7 @@ const ACTION_TO_SHEET = {
 
 // Who is allowed to do what. super_admin can always do everything
 // dispatcher/admin can (checked by inclusion below).
-const WRITE_ROLES      = ["dispatcher", "admin", "super_admin"]; // add/delete farmers, trucks, dispatches, requests, sms
+const WRITE_ROLES      = ["dispatcher", "admin", "super_admin"]; // add/delete farmers, trucks, dispatches, requests, sms, broadcast
 const USER_MGMT_ROLES  = ["super_admin"];                        // invite/list/promote/remove users
 
 // ── ENTRY POINTS ─────────────────────────────────────────────
@@ -95,6 +104,11 @@ function doPost(e) {
       case "sendSms":
         requireRole(token, WRITE_ROLES);
         return jsonResponse(sendSmsViaTwilio(payload.to, payload.body));
+
+      case "sendBroadcast": {
+        const caller = requireRole(token, WRITE_ROLES);
+        return jsonResponse(sendBroadcastViaTwilio(payload.message, payload.recipients, caller.email));
+      }
 
       case "listUsers":
         requireRole(token, USER_MGMT_ROLES);
@@ -251,6 +265,80 @@ function sendSmsViaTwilio(to, body) {
   const code = resp.getResponseCode();
   if (code >= 200 && code < 300) return { ok: true };
   return { ok: false, error: "Twilio error (HTTP " + code + "): " + resp.getContentText() };
+}
+
+// ── BROADCAST (step 1 of the outbound flow) ──────────────────
+// Ops picks a message + a list of farmers on the dashboard's
+// "Broadcast" page and sends it *before* any farmer has texted in
+// ("hey we wanna buy XYZ"). This loops sendSmsViaTwilio() once per
+// recipient (Twilio has no native "send to many" call) and logs one
+// summary row to the Broadcasts tab so there's an audit trail of
+// what was sent, when, to how many people, and by whom.
+function sendBroadcastViaTwilio(message, recipients, senderEmail) {
+  if (!message || !String(message).trim()) {
+    throw new Error("Message body is required.");
+  }
+  if (!Array.isArray(recipients) || !recipients.length) {
+    throw new Error("Select at least one recipient.");
+  }
+
+  // De-dupe and drop anything blank.
+  const uniquePhones = Array.from(new Set(
+    recipients.map(p => String(p || "").trim()).filter(Boolean)
+  ));
+
+  // Apps Script web apps have a ~6 minute execution ceiling. At
+  // roughly 300–500ms per Twilio call this comfortably covers a few
+  // hundred recipients. If your farmer list grows past this, send in
+  // batches (call this action multiple times with different slices
+  // of the recipient list) rather than raising the cap.
+  const MAX_RECIPIENTS = 500;
+  if (uniquePhones.length > MAX_RECIPIENTS) {
+    throw new Error(
+      "Too many recipients (" + uniquePhones.length + "). " +
+      "Split into batches of " + MAX_RECIPIENTS + " or fewer."
+    );
+  }
+
+  let sent = 0;
+  const failed = [];
+
+  uniquePhones.forEach(to => {
+    const result = sendSmsViaTwilio(to, message);
+    if (result.ok) {
+      sent++;
+    } else {
+      failed.push({ to: to, error: result.error });
+    }
+  });
+
+  // Log the summary — best-effort: a missing/renamed tab shouldn't
+  // undo SMS that already went out, so this doesn't throw on failure.
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Broadcasts");
+    if (sheet) {
+      const columns = SHEET_COLUMNS.Broadcasts;
+      const rowObj = {
+        SentAt: new Date().toISOString(),
+        Message: message,
+        RecipientCount: sent,
+        FailedCount: failed.length,
+        SentBy: senderEmail || "",
+      };
+      sheet.appendRow(columns.map(col => rowObj[col] ?? ""));
+    }
+  } catch (logErr) {
+    // Swallow — the sends themselves already happened and were
+    // reported below; a logging failure shouldn't look like a send
+    // failure to the operator.
+  }
+
+  return {
+    ok: true,
+    sent: sent,
+    failed: failed.length,
+    failedNumbers: failed.slice(0, 20), // cap payload size on big failures
+  };
 }
 
 // ── USER MANAGEMENT (super_admin only) ───────────────────────
