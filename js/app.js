@@ -1,5 +1,5 @@
 // ============================================================
-// js/app.js  —  Page Routing, Auth Flow, Actions
+// js/app.js  —  Page Routing, Auth Flow, Actions new
 // ============================================================
 // Load order (index.html): config.js → auth.js → data.js → intake.js
 // → map.js → tables.js → app.js — so every helper this file calls
