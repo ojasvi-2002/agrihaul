@@ -16,7 +16,8 @@
 //
 // ROLES: viewer < dispatcher/admin < super_admin.
 //   - viewer      read-only: dashboard, map, dispatch log
-//   - dispatcher  everyday ops work: + requests, trucks, farmers
+//   - dispatcher  everyday ops work: + requests, trucks, farmers,
+//                 broadcast
 //   - admin       same day-to-day access as dispatcher — the
 //                 difference between "admin" and "dispatcher" is
 //                 organizational, not technical, in this build
@@ -56,12 +57,17 @@
 //     which emails are registered. Previously this looked exactly like
 //     a brand-new signup and told the person to "check your email"
 //     when nothing new was actually sent.
+//
+// ADDED: "broadcast" page added to dispatcher/admin/super_admin —
+// step 1 of the outbound flow (send a message to farmers before they
+// text in). Same write-role list as trucks/farmers/requests, since
+// Code.gs gates the actual sendBroadcast action behind WRITE_ROLES.
 // ============================================================
 
 const ROLE_PAGES = {
-  super_admin: ["dashboard", "map", "requests", "dispatch", "trucks", "farmers", "users"],
-  admin:       ["dashboard", "map", "requests", "dispatch", "trucks", "farmers"],
-  dispatcher:  ["dashboard", "map", "requests", "dispatch", "trucks", "farmers"],
+  super_admin: ["dashboard", "map", "requests", "dispatch", "trucks", "farmers", "broadcast", "users"],
+  admin:       ["dashboard", "map", "requests", "dispatch", "trucks", "farmers", "broadcast"],
+  dispatcher:  ["dashboard", "map", "requests", "dispatch", "trucks", "farmers", "broadcast"],
   viewer:      ["dashboard", "map", "dispatch"],
 };
 
