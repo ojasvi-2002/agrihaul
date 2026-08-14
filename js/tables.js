@@ -17,6 +17,13 @@
 //     values are passed via data-* attributes rather than interpolated
 //     into the onclick string, so a stray quote in a name/phone can't
 //     break out of the handler and inject arbitrary JS.
+//
+// ADDED: renderBroadcastRecipients() / filterBroadcastRecipients() /
+// renderBroadcastHistory() for the new Broadcast page (step 1 of the
+// outbound flow — ops messages farmers before they text in). Same
+// escapeHtml() discipline as everything else here, since farmer
+// Name/Village/Phone are still attacker-reachable via the Add Farmer
+// form or an SMS-registered farmer.
 // ============================================================
 
 // ── ESCAPING HELPER ───────────────────────────────────────────
@@ -260,6 +267,69 @@ function filterRequests() {
       .toLowerCase().includes(q)
   );
   renderRequestsTable(filtered, _allTrucks);
+}
+
+// ── BROADCAST — recipient picker ────────────────────────────────
+// Step 1 of the outbound flow: ops picks a message + a list of
+// farmers and sends it *before* any farmer has texted in. This is
+// the checkbox picker on the left of the Broadcast page; selection
+// state itself lives in js/app.js (_broadcastSelected), since it
+// needs to survive across re-renders (search, data refresh) within
+// a session.
+let _broadcastFarmers = []; // farmers currently shown in the picker (post-search)
+
+function renderBroadcastRecipients(farmers, selectedPhones) {
+  const wrap = document.getElementById("broadcastRecipientList");
+  if (!wrap) return;
+  _broadcastFarmers = farmers;
+
+  if (!farmers.length) {
+    wrap.innerHTML = `<div class="form-hint" style="padding:12px">No farmers match your search.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = farmers.map(f => {
+    const phone = f.Phone;
+    const checked = selectedPhones.has(phone) ? "checked" : "";
+    return `
+      <label class="broadcast-recipient-row">
+        <input type="checkbox" data-phone="${escapeHtml(phone)}"
+          ${checked} onchange="toggleBroadcastRecipient(this.dataset.phone, this.checked)">
+        <span class="primary">${escapeHtml(f.Name)}</span>
+        <span class="form-hint">${escapeHtml(f.Village || "—")} · ${escapeHtml(phone)}</span>
+      </label>`;
+  }).join("");
+}
+
+function filterBroadcastRecipients() {
+  const q = (document.getElementById("broadcastRecipientSearch")?.value || "").toLowerCase();
+  const filtered = _allFarmers.filter(f =>
+    `${f.Name} ${f.Village} ${f.Phone}`.toLowerCase().includes(q)
+  );
+  renderBroadcastRecipients(filtered, _broadcastSelected);
+}
+
+// ── BROADCAST — history table ────────────────────────────────────
+function renderBroadcastHistory(broadcasts) {
+  const tbody = document.getElementById("broadcastHistoryTable");
+  if (!tbody) return;
+  if (!broadcasts.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="form-hint">No broadcasts sent yet.</td></tr>`;
+    return;
+  }
+  const sorted = [...broadcasts].sort((a, b) => new Date(b.SentAt) - new Date(a.SentAt));
+  tbody.innerHTML = sorted.map(b => `
+    <tr>
+      <td class="mono" style="font-size:11px">${escapeHtml(formatBroadcastDate(b.SentAt))}</td>
+      <td>${escapeHtml(b.Message)}</td>
+      <td class="mono">${escapeHtml(b.RecipientCount)}${Number(b.FailedCount) ? ` <span style="color:var(--red)">(${escapeHtml(b.FailedCount)} failed)</span>` : ""}</td>
+      <td class="mono" style="font-size:11px">${escapeHtml(b.SentBy || "—")}</td>
+    </tr>`).join("");
+}
+
+function formatBroadcastDate(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso) : d.toLocaleString();
 }
 
 // ── SMALL UTILITIES ───────────────────────────────────────────
