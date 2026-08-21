@@ -26,11 +26,24 @@ export function ConversationsPage() {
 
   useEffect(() => {
     if (!selectedId) return;
+    // A click on a different conversation before this fetch resolves
+    // must not let this stale response overwrite the newer selection's
+    // messages — `cancelled` guards every state update below on that.
+    let cancelled = false;
     setLoadingThread(true);
     listMessages(selectedId)
-      .then(setMessages)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load messages"))
-      .finally(() => setLoadingThread(false));
+      .then((msgs) => {
+        if (!cancelled) setMessages(msgs);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : "Failed to load messages");
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingThread(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedId]);
 
   async function handleSend(e: FormEvent) {
