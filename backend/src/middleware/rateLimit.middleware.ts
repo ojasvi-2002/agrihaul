@@ -23,10 +23,11 @@ export const loginRateLimiter = rateLimit({
   handler,
 });
 
-// Looser and longer-lived than login — signing up isn't something a
-// legitimate user does repeatedly, so a lower ceiling over a longer window
-// still leaves room for a dev/demo flow while blocking scripted mass
-// organization creation.
+// Same raw count as login but over a 4x longer window, so it's actually
+// the *stricter* of the two per unit time — appropriate since signing up
+// isn't something a legitimate user does repeatedly, unlike mistyping a
+// password. Still leaves enough room for a normal dev/demo flow while
+// blocking scripted mass organization creation.
 export const signupRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   limit: 10,
