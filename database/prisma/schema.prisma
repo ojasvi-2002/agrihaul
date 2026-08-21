@@ -114,6 +114,7 @@ model Organization {
   vehicles       Vehicle[]
   assignments    Assignment[]
   phoneNumbers   OrganizationPhoneNumber[]
+  teamInvites    TeamInvite[]
 }
 
 model User {
@@ -128,6 +129,32 @@ model User {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sessions     Session[]
+  sentInvites  TeamInvite[]
+
+  @@index([organizationId])
+}
+
+// A pending team invitation — created by an OWNER/ADMIN, emailed to the
+// invitee (integrations/email), and turned into a real User only once
+// they follow the link and set their own password (Phase 12's original
+// "OWNER sets a password directly" flow shared it out of band instead;
+// this replaces that now that email sending exists, even in dev-log
+// form — see integrations/email/client.ts). The invitee, not the
+// inviter, is the one who ever knows the password.
+model TeamInvite {
+  id              String    @id @default(cuid())
+  organizationId  String
+  name            String
+  email           String
+  role            UserRole
+  tokenHash       String    @unique
+  invitedByUserId String
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
 }

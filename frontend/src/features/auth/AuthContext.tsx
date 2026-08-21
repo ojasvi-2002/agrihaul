@@ -9,6 +9,7 @@ type AuthState = {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (organizationName: string, ownerName: string, email: string, password: string) => Promise<void>;
+  acceptInvite: (token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -50,6 +51,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOrganization(res.organization);
   }
 
+  async function acceptInvite(token: string, password: string) {
+    const res = await apiFetch<{ user: User; organization: Organization }>("/api/team/invites/accept", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    });
+    setUser(res.user);
+    setOrganization(res.organization);
+  }
+
   async function logout() {
     await apiFetch("/api/auth/logout", { method: "POST" });
     setUser(null);
@@ -57,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, organization, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, organization, loading, login, signup, acceptInvite, logout }}>
       {children}
     </AuthContext.Provider>
   );

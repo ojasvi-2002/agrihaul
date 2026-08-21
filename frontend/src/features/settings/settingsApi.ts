@@ -1,5 +1,5 @@
 import { apiFetch } from "../../lib/apiClient";
-import type { Organization, OrganizationPhoneNumber, User, UserRole } from "../../types/api";
+import type { Organization, OrganizationPhoneNumber, TeamInvite, User, UserRole } from "../../types/api";
 
 export function updateOrganization(name: string) {
   return apiFetch<{ organization: Organization }>("/api/organizations/current", {
@@ -32,9 +32,17 @@ export function listTeam() {
   return apiFetch<{ users: User[] }>("/api/team").then((r) => r.users);
 }
 
-export function inviteTeamMember(data: { name: string; email: string; role: UserRole; password: string }) {
-  return apiFetch<{ user: User }>("/api/team", {
+export function inviteTeamMember(data: { name: string; email: string; role: UserRole }) {
+  return apiFetch<{ invite: TeamInvite }>("/api/team", {
     method: "POST",
     body: JSON.stringify(data),
-  }).then((r) => r.user);
+  }).then((r) => r.invite);
+}
+
+export function listPendingInvites() {
+  return apiFetch<{ invites: TeamInvite[] }>("/api/team/invites").then((r) => r.invites);
+}
+
+export function revokeInvite(id: string) {
+  return apiFetch<void>(`/api/team/invites/${id}`, { method: "DELETE" });
 }

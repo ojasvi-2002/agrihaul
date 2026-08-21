@@ -13,6 +13,15 @@ export type User = {
   role: UserRole;
 };
 
+export type TeamInvite = {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  expiresAt: string;
+  createdAt: string;
+};
+
 export type PlatformAdmin = {
   id: string;
   name: string;

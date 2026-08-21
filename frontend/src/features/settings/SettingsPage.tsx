@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext";
-import type { OrganizationPhoneNumber, User, UserRole } from "../../types/api";
+import type { OrganizationPhoneNumber, TeamInvite, User, UserRole } from "../../types/api";
 import * as api from "./settingsApi";
 import { ApiError } from "../../lib/apiClient";
 
@@ -194,18 +194,21 @@ const ROLES: UserRole[] = ["OWNER", "ADMIN", "DISPATCHER", "DRIVER"];
 
 function TeamSection({ canManage }: { canManage: boolean }) {
   const [users, setUsers] = useState<User[]>([]);
+  const [invites, setInvites] = useState<TeamInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole>("DISPATCHER");
-  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [justInvited, setJustInvited] = useState<string | null>(null);
 
   async function refresh() {
     try {
-      setUsers(await api.listTeam());
+      const [u, i] = await Promise.all([api.listTeam(), canManage ? api.listPendingInvites() : Promise.resolve([])]);
+      setUsers(u);
+      setInvites(i);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load team");
     } finally {
@@ -215,23 +218,34 @@ function TeamSection({ canManage }: { canManage: boolean }) {
 
   useEffect(() => {
     refresh();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage]);
 
   async function handleInvite(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
+    setJustInvited(null);
     try {
-      await api.inviteTeamMember({ name, email, role, password });
+      const invite = await api.inviteTeamMember({ name, email, role });
+      setJustInvited(invite.email);
       setName("");
       setEmail("");
-      setPassword("");
       setShowForm(false);
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to add team member");
+      setError(err instanceof ApiError ? err.message : "Failed to send invite");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleRevoke(inviteId: string) {
+    try {
+      await api.revokeInvite(inviteId);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to revoke invite");
     }
   }
 
@@ -241,7 +255,7 @@ function TeamSection({ canManage }: { canManage: boolean }) {
         <h2>Team</h2>
         {canManage && (
           <button className="btn-sm" onClick={() => setShowForm((v) => !v)}>
-            + Add teammate
+            + Invite teammate
           </button>
         )}
       </div>
@@ -269,24 +283,13 @@ function TeamSection({ canManage }: { canManage: boolean }) {
                 ))}
               </select>
             </label>
-            <label>
-              Initial password
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                minLength={8}
-                required
-              />
-            </label>
           </div>
           <p className="settings-note">
-            Share this password with them directly — there's no email-invite flow yet, so this is how they'll sign in
-            the first time.
+            They'll get an email with a link to set their own password and join — nothing to share yourself.
           </p>
           <div className="form-actions">
             <button type="submit" disabled={submitting}>
-              Add teammate
+              Send invite
             </button>
             <button type="button" className="btn-ghost" onClick={() => setShowForm(false)}>
               Cancel
@@ -295,6 +298,7 @@ function TeamSection({ canManage }: { canManage: boolean }) {
         </form>
       )}
 
+      {justInvited && <p className="settings-note">Invite sent to {justInvited}.</p>}
       {error && <p className="page-error">{error}</p>}
       {loading && <div className="empty-state">Loading…</div>}
       {!loading && (
@@ -316,6 +320,45 @@ function TeamSection({ canManage }: { canManage: boolean }) {
             ))}
           </tbody>
         </table>
+      )}
+
+      {!loading && canManage && invites.length > 0 && (
+        <>
+          <h3 className="settings-subheading">Pending invites</h3>
+          <table className="registry-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {invites.map((inv) => {
+                const expired = new Date(inv.expiresAt).getTime() < Date.now();
+                return (
+                  <tr key={inv.id}>
+                    <td>{inv.name}</td>
+                    <td className="mono">{inv.email}</td>
+                    <td>{inv.role}</td>
+                    <td>
+                      <span className={`status-badge status-${expired ? "inactive" : "active"}`}>
+                        {expired ? "Expired" : "Pending"}
+                      </span>
+                    </td>
+                    <td>
+                      <button className="btn-ghost btn-sm" onClick={() => handleRevoke(inv.id)}>
+                        Revoke
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
       )}
     </section>
   );

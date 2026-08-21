@@ -832,6 +832,14 @@ input {
   margin: 8px 0 0;
 }
 
+.settings-subheading {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 24px 0 8px;
+}
+
 /* ── Platform admin ───────────────────────────────────────── */
 /* A visibly different topbar color is deliberate — this is a distinct,
    higher-privilege area and should never look like a normal org page. */

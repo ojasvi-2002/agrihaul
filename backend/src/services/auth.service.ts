@@ -19,7 +19,11 @@ function hashToken(rawToken: string) {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
 }
 
-async function createSessionFor(userId: string) {
+// Exported so other flows that log a user in immediately after creating
+// their account (signup below, and team.service.ts's acceptInvite) share
+// the exact same token-generation logic rather than each reimplementing
+// it.
+export async function createSessionFor(userId: string) {
   const rawToken = generateRawToken();
   const expiresAt = new Date(Date.now() + env.sessionTtlMs);
   await createSession(userId, hashToken(rawToken), expiresAt);

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom
 import { AuthProvider } from "./features/auth/AuthContext";
 import { LoginPage } from "./features/auth/LoginPage";
 import { SignupPage } from "./features/auth/SignupPage";
+import { AcceptInvitePage } from "./features/auth/AcceptInvitePage";
 import { AppLayout } from "./layouts/AppLayout";
 import { ConversationsPage } from "./features/conversations/ConversationsPage";
 import { PickupsPage } from "./features/pickups/PickupsPage";
@@ -41,6 +42,7 @@ function App() {
         <Route element={<OrgSection />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
+          <Route path="/accept-invite" element={<AcceptInvitePage />} />
           <Route element={<AppLayout />}>
             <Route path="/conversations" element={<ConversationsPage />} />
             <Route path="/pickups" element={<PickupsPage />} />

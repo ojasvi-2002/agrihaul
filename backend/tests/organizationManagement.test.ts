@@ -222,24 +222,24 @@ describe("organization settings, phone numbers, and team management", () => {
     expect(res.body.phoneNumbers).toHaveLength(0);
   });
 
-  it("lets an OWNER invite a teammate who can then log in, but not a DISPATCHER", async () => {
+  it("lets an OWNER create a team invite, but not a DISPATCHER", async () => {
     const forbidden = await request(app)
       .post("/api/team")
       .set("Cookie", dispatcherCookie)
-      .send({ name: "New Hire", email: `nope-${Date.now()}@test.local`, role: "DISPATCHER", password: "Password123!" });
+      .send({ name: "New Hire", email: `nope-${Date.now()}@test.local`, role: "DISPATCHER" });
     expect(forbidden.status).toBe(403);
 
     const newEmail = `invited-${Date.now()}@test.local`;
     const inviteRes = await request(app)
       .post("/api/team")
       .set("Cookie", ownerCookie)
-      .send({ name: "New Hire", email: newEmail, role: "DISPATCHER", password: "Password123!" });
+      .send({ name: "New Hire", email: newEmail, role: "DISPATCHER" });
     expect(inviteRes.status).toBe(201);
-    expect(inviteRes.body.user.role).toBe("DISPATCHER");
-
-    const loginRes = await request(app).post("/api/auth/login").send({ email: newEmail, password: "Password123!" });
-    expect(loginRes.status).toBe(200);
-    expect(loginRes.body.organization.id).toBe(organizationId);
+    expect(inviteRes.body.invite.role).toBe("DISPATCHER");
+    // Inviting alone must not create a usable account — only accepting
+    // the invite does (see tests/teamInvite.test.ts for that full loop).
+    const loginAttempt = await request(app).post("/api/auth/login").send({ email: newEmail, password: "anything" });
+    expect(loginAttempt.status).toBe(401);
   });
 
   it("never includes passwordHash in the team list response", async () => {
@@ -254,44 +254,43 @@ describe("organization settings, phone numbers, and team management", () => {
     const asAdmin = await request(app)
       .post("/api/team")
       .set("Cookie", adminCookie)
-      .send({ name: "Sneaky", email: `escalate-${Date.now()}@test.local`, role: "OWNER", password: "Password123!" });
+      .send({ name: "Sneaky", email: `escalate-${Date.now()}@test.local`, role: "OWNER" });
     expect(asAdmin.status).toBe(403);
 
     const asOwner = await request(app)
       .post("/api/team")
       .set("Cookie", ownerCookie)
-      .send({ name: "Second Owner", email: `second-owner-${Date.now()}@test.local`, role: "OWNER", password: "Password123!" });
+      .send({ name: "Second Owner", email: `second-owner-${Date.now()}@test.local`, role: "OWNER" });
     expect(asOwner.status).toBe(201);
-    expect(asOwner.body.user.role).toBe("OWNER");
+    expect(asOwner.body.invite.role).toBe("OWNER");
   });
 
-  it("rejects inviting a teammate with an email already in use", async () => {
+  it("rejects inviting an email that already has a pending invite", async () => {
     const email = `org-mgmt-owner-conflict-${Date.now()}@test.local`;
     const first = await request(app)
       .post("/api/team")
       .set("Cookie", ownerCookie)
-      .send({ name: "Dup", email, role: "DISPATCHER", password: "Password123!" });
+      .send({ name: "Dup", email, role: "DISPATCHER" });
     expect(first.status).toBe(201);
 
     const second = await request(app)
       .post("/api/team")
       .set("Cookie", ownerCookie)
-      .send({ name: "Dup Again", email, role: "DISPATCHER", password: "Password123!" });
+      .send({ name: "Dup Again", email, role: "DISPATCHER" });
     expect(second.status).toBe(400);
   });
 
-  it("lists exactly this organization's team, not another org's", async () => {
+  it("lists exactly this organization's team (actual users, not pending invites), not another org's", async () => {
     const res = await request(app).get("/api/team").set("Cookie", ownerCookie);
     expect(res.status).toBe(200);
     const names = res.body.users.map((u: { name: string }) => u.name);
     expect(names).toContain("Test Owner");
     expect(names).toContain("Test Dispatcher");
-    expect(names).toContain("New Hire");
+    expect(names).not.toContain("New Hire"); // only invited, never accepted — not a real user
     expect(names).not.toContain("Other Owner");
 
     const otherRes = await request(app).get("/api/team").set("Cookie", otherOrgOwnerCookie);
     const otherNames = otherRes.body.users.map((u: { name: string }) => u.name);
     expect(otherNames).not.toContain("Test Dispatcher");
-    expect(otherNames).not.toContain("New Hire");
   });
 });

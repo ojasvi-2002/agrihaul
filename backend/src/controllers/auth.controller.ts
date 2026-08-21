@@ -12,7 +12,11 @@ const COOKIE_OPTIONS = {
   secure: process.env.NODE_ENV === "production",
 };
 
-function respondWithSession(
+// Exported so any other flow that logs a user in immediately after
+// creating their account (team.controller.ts's acceptInvite) sends back
+// the exact same session-cookie-plus-user-and-organization shape,
+// instead of each reimplementing it slightly differently.
+export function respondWithSession(
   res: Response,
   result: { rawToken: string; expiresAt: Date; user: { id: string; name: string; email: string; role: string; organization: { id: string; name: string; slug: string } } },
   status = 200,
