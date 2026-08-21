@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requirePlatformAdminAuth } from "../middleware/requirePlatformAdminAuth.middleware";
+import { platformAdminLoginRateLimiter } from "../middleware/rateLimit.middleware";
 import { postLogin, postLogout, getMe } from "../controllers/platformAdminAuth.controller";
 import {
   listOrganizations,
@@ -15,7 +16,7 @@ import {
 // scripts/createPlatformAdmin.ts, never self-registered.
 export const platformAdminRouter = Router();
 
-platformAdminRouter.post("/auth/login", postLogin);
+platformAdminRouter.post("/auth/login", platformAdminLoginRateLimiter, postLogin);
 platformAdminRouter.post("/auth/logout", postLogout);
 platformAdminRouter.get("/auth/me", requirePlatformAdminAuth, getMe);
 

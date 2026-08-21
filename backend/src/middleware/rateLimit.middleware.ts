@@ -34,3 +34,17 @@ export const signupRateLimiter = rateLimit({
   legacyHeaders: false,
   handler,
 });
+
+// Stricter than the organization-user login: platform admins are
+// provisioned only via scripts/createPlatformAdmin.ts (never self-signup),
+// so there are few of them and a legitimate one rarely mistypes a password
+// more than once or twice — while a compromised platform-admin account has
+// power over every organization on the platform (CLAUDE.md §34), so this
+// surface deserves the tightest budget of the three.
+export const platformAdminLoginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler,
+});

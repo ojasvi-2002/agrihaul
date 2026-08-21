@@ -1,6 +1,6 @@
 // Proves the login/signup rate limiters (rateLimit.middleware.ts) actually
 // trigger, not just that they're wired up. Each `it` here needs its own
-// fresh limiter window, so keep this the only file that hammers these two
+// fresh limiter window, so keep this the only file that hammers these
 // routes past their limit — vitest's per-file module isolation gives each
 // test file its own in-memory limiter store, but not each `it` within one.
 import { describe, it, expect, afterAll } from "vitest";
@@ -44,5 +44,16 @@ describe("rate limiting on auth endpoints", () => {
       last = res;
     }
     expect(last!.status).toBe(429);
+  });
+
+  it("blocks platform-admin login attempts past its (stricter) limit with 429", async () => {
+    let last;
+    for (let i = 0; i < 6; i++) {
+      last = await request(app)
+        .post("/api/platform-admin/auth/login")
+        .send({ email: "nobody@test.local", password: "WrongPassword123!" });
+    }
+    expect(last!.status).toBe(429);
+    expect(last!.body.error.message).toMatch(/too many/i);
   });
 });
