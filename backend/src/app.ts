@@ -20,8 +20,12 @@ import { twilioWebhookRouter } from "./routes/twilioWebhook.routes";
 export const app = express();
 
 // Needed for req.protocol/req.get("host") to reflect the real public URL
-// behind a reverse proxy — the Twilio signature check depends on it.
-app.set("trust proxy", true);
+// behind a reverse proxy — the Twilio signature check depends on it. Was
+// `true` (trust unlimited hops), which let a client forge X-Forwarded-For
+// and spoof its apparent IP, defeating the IP-keyed rate limiters below —
+// see env.trustProxyHops for the fix and how to configure it correctly
+// when actually deployed behind a proxy.
+app.set("trust proxy", env.trustProxyHops);
 
 app.use(cors({ origin: env.corsOrigin, credentials: true }));
 
