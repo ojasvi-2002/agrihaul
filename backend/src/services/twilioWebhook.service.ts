@@ -10,6 +10,7 @@ import {
 } from "../repositories/message.repository";
 import { processIncomingMessage } from "../modules/messageProcessing/processor";
 import { handleDriverMessage } from "./dispatch.service";
+import { broadcast } from "../modules/realtime/hub";
 
 function isUniqueConstraintError(err: unknown) {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
@@ -73,6 +74,12 @@ export async function handleIncomingSms(params: { to: string; from: string; body
     // therefore also already ran it through the processor below.
     return findByProviderMessageId("TWILIO", params.messageSid);
   }
+
+  // Phase 14 — pushes the raw message to any dispatcher with this
+  // conversation open, live. Deliberately fires before parsing/pickup
+  // creation below: what a dispatcher sees on the Conversations screen
+  // is the message itself, not a derived pickup request.
+  broadcast(organizationId, "message", { message, conversationId: conversation.id });
 
   // Only reached for a genuinely new message — never re-run on a
   // duplicate webhook delivery (CLAUDE.md §26: a retry must not create a

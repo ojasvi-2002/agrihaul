@@ -16,6 +16,7 @@ import { vehicleRouter } from "./routes/vehicle.routes";
 import { teamRouter } from "./routes/team.routes";
 import { platformAdminRouter } from "./routes/platformAdmin.routes";
 import { twilioWebhookRouter } from "./routes/twilioWebhook.routes";
+import { realtimeRouter } from "./routes/realtime.routes";
 
 export const app = express();
 
@@ -48,6 +49,7 @@ app.use("/api/drivers", driverRouter);
 app.use("/api/vehicles", vehicleRouter);
 app.use("/api/team", teamRouter);
 app.use("/api/platform-admin", platformAdminRouter);
+app.use("/api/realtime", realtimeRouter);
 
 app.use((req: Request, res: Response) => {
   res.status(404).json({ error: { message: "Not found" } });

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { Conversation, Message } from "../../types/api";
 import { listConversations, listMessages, sendMessage } from "./conversationsApi";
-import { ApiError } from "../../lib/apiClient";
+import { ApiError, API_URL } from "../../lib/apiClient";
 
 export function ConversationsPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -45,6 +45,35 @@ export function ConversationsPage() {
       cancelled = true;
     };
   }, [selectedId]);
+
+  // A ref, not state — the SSE handler below is registered once (empty
+  // dependency array) and would otherwise see a stale `selectedId` from
+  // whatever it was when the effect first ran.
+  const selectedIdRef = useRef(selectedId);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  // Phase 14 — one persistent connection per open tab, live-pushing any
+  // new message (farmer inbound, or a reply from another dispatcher's
+  // tab) into the thread if it's the one currently open. Deliberately
+  // page-scoped rather than app-wide: nothing else is realtime yet, so a
+  // dispatcher not on this page doesn't need the connection open.
+  useEffect(() => {
+    const source = new EventSource(`${API_URL}/api/realtime/events`, { withCredentials: true });
+    source.addEventListener("message", (e: MessageEvent<string>) => {
+      const { message, conversationId }: { message: Message; conversationId: string } = JSON.parse(e.data);
+      if (conversationId !== selectedIdRef.current) return;
+      setMessages((prev) => {
+        // The sender's own tab already appended its own outbound message
+        // locally (see handleSend below) — this dedupes against that
+        // rather than showing it twice when the broadcast echoes back.
+        if (prev.some((m) => m.id === message.id)) return prev;
+        return [...prev, message];
+      });
+    });
+    return () => source.close();
+  }, []);
 
   async function handleSend(e: FormEvent) {
     e.preventDefault();

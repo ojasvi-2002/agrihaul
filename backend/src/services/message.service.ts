@@ -3,6 +3,7 @@ import { findConversationById } from "../repositories/conversation.repository";
 import { findActivePhoneNumber } from "../repositories/organizationPhoneNumber.repository";
 import { sendSms } from "../integrations/twilio/client";
 import { ServiceError } from "../utils/serviceErrors";
+import { broadcast } from "../modules/realtime/hub";
 
 export const getMessage = messageRepo.findMessageById;
 
@@ -34,8 +35,18 @@ export async function createOutboundMessage(organizationId: string, conversation
   // backend actually dispatches an SMS. Failure here doesn't roll back the
   // message row: it's kept as a QUEUED record of the attempt.
   const result = await sendSms(conversation.farmer.phoneNumber, orgPhone.twilioPhoneNumber, body);
-  if (result.sent) {
-    return messageRepo.setProviderMessageId(message.id, result.sid, "SENT");
-  }
-  return message;
+  const finalMessage = result.sent
+    ? await messageRepo.setProviderMessageId(message.id, result.sid, "SENT")
+    : message;
+
+  // Covers both a dispatcher's own reply and a system-generated message
+  // (dispatch confirmations, completion notices via dispatch.service.ts's
+  // notifyFarmer) — this is the one place either kind of outbound message
+  // gets created, so it's the one place that needs to broadcast. Lets a
+  // *second* dispatcher watching the same conversation in another tab see
+  // it appear live; the sender's own tab already has it from its local
+  // state update.
+  broadcast(organizationId, "message", { message: finalMessage, conversationId });
+
+  return finalMessage;
 }
