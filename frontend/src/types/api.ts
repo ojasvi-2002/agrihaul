@@ -37,6 +37,36 @@ export type OrganizationWithCounts = {
   _count: { users: number; farmers: number; pickupRequests: number };
 };
 
+export type PlatformStats = {
+  totalOrganizations: number;
+  activeOrganizations: number;
+  suspendedOrganizations: number;
+  totalUsers: number;
+  totalFarmers: number;
+  totalPickups: number;
+};
+
+export type OrganizationDetail = {
+  id: string;
+  name: string;
+  slug: string;
+  status: "ACTIVE" | "SUSPENDED";
+  createdAt: string;
+  lastActivityAt: string | null;
+  _count: {
+    users: number;
+    farmers: number;
+    farms: number;
+    drivers: number;
+    vehicles: number;
+    conversations: number;
+    messages: number;
+    pickupRequests: number;
+  };
+  users: { id: string; name: string; email: string; role: UserRole; createdAt: string }[];
+  phoneNumbers: { id: string; twilioPhoneNumber: string; friendlyName: string | null; active: boolean }[];
+};
+
 export type Farmer = {
   id: string;
   name: string;

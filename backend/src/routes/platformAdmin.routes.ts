@@ -4,6 +4,7 @@ import { platformAdminLoginRateLimiter } from "../middleware/rateLimit.middlewar
 import { postLogin, postLogout, getMe } from "../controllers/platformAdminAuth.controller";
 import {
   listOrganizations,
+  getStats,
   getOrganization,
   createOrganization,
   suspendOrganization,
@@ -22,6 +23,9 @@ platformAdminRouter.get("/auth/me", requirePlatformAdminAuth, getMe);
 
 platformAdminRouter.use("/organizations", requirePlatformAdminAuth);
 platformAdminRouter.get("/organizations", listOrganizations);
+// Must come before /organizations/:id — otherwise Express would match
+// "stats" as the :id param and this route would never be reached.
+platformAdminRouter.get("/organizations/stats", getStats);
 platformAdminRouter.get("/organizations/:id", getOrganization);
 platformAdminRouter.post("/organizations", createOrganization);
 platformAdminRouter.post("/organizations/:id/suspend", suspendOrganization);

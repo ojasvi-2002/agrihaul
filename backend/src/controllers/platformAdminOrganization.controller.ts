@@ -9,6 +9,11 @@ export async function listOrganizations(req: Request, res: Response) {
   res.json({ organizations });
 }
 
+export async function getStats(req: Request, res: Response) {
+  const stats = await platformAdminOrgService.getPlatformStats();
+  res.json({ stats });
+}
+
 export async function getOrganization(req: Request, res: Response) {
   const organization = await platformAdminOrgService.getOrganization(idParam(req));
   if (!organization) return notFound(res, "Organization");

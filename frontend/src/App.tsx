@@ -15,6 +15,7 @@ import { SettingsPage } from "./features/settings/SettingsPage";
 import { PlatformAdminAuthProvider } from "./features/platformAdmin/PlatformAdminAuthContext";
 import { PlatformAdminLoginPage } from "./features/platformAdmin/PlatformAdminLoginPage";
 import { PlatformAdminDashboardPage } from "./features/platformAdmin/PlatformAdminDashboardPage";
+import { PlatformAdminOrganizationDetailPage } from "./features/platformAdmin/PlatformAdminOrganizationDetailPage";
 
 // Two structurally independent trees: an organization user is never in
 // PlatformAdminAuthProvider's tree and vice versa (CLAUDE.md §34 — keep
@@ -58,6 +59,7 @@ function App() {
         <Route element={<PlatformAdminSection />}>
           <Route path="/platform-admin/login" element={<PlatformAdminLoginPage />} />
           <Route path="/platform-admin" element={<PlatformAdminDashboardPage />} />
+          <Route path="/platform-admin/organizations/:id" element={<PlatformAdminOrganizationDetailPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/conversations" replace />} />

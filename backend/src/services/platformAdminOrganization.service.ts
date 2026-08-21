@@ -5,7 +5,15 @@ import { uniqueSlugFor } from "../utils/slugify";
 import { ServiceError } from "../utils/serviceErrors";
 
 export const listOrganizations = orgRepo.listAllOrganizations;
-export const getOrganization = orgRepo.findOrganizationByIdForPlatform;
+export const getPlatformStats = orgRepo.getPlatformStats;
+
+export async function getOrganization(id: string) {
+  const organization = await orgRepo.findOrganizationByIdForPlatform(id);
+  if (!organization) return null;
+
+  const lastActivity = await orgRepo.findLastActivityForOrg(id);
+  return { ...organization, lastActivityAt: lastActivity?.createdAt ?? null };
+}
 
 // Reuses the exact same transactional org+owner creation as self-serve
 // signup (Phase 12) — a platform admin setting up an org on a customer's

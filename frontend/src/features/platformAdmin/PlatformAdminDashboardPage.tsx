@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { usePlatformAdminAuth } from "./PlatformAdminAuthContext";
-import type { OrganizationWithCounts } from "../../types/api";
+import type { OrganizationWithCounts, PlatformStats } from "../../types/api";
 import * as api from "./platformAdminApi";
 import { ApiError } from "../../lib/apiClient";
 
 export function PlatformAdminDashboardPage() {
+  const navigate = useNavigate();
   const { admin, loading: authLoading, logout } = usePlatformAdminAuth();
   const [organizations, setOrganizations] = useState<OrganizationWithCounts[]>([]);
+  const [stats, setStats] = useState<PlatformStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -16,7 +18,9 @@ export function PlatformAdminDashboardPage() {
 
   async function refresh() {
     try {
-      setOrganizations(await api.listOrganizations());
+      const [orgs, platformStats] = await Promise.all([api.listOrganizations(), api.getStats()]);
+      setOrganizations(orgs);
+      setStats(platformStats);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to load organizations");
     } finally {
@@ -67,12 +71,42 @@ export function PlatformAdminDashboardPage() {
         {error && <p className="page-error">{error}</p>}
         {loading && <div className="empty-state">Loading…</div>}
 
+        {!loading && stats && (
+          <div className="stat-strip">
+            <div className="stat-card">
+              <div className="stat-card-value">{stats.totalOrganizations}</div>
+              <div className="stat-card-label">Organizations</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-value">{stats.activeOrganizations}</div>
+              <div className="stat-card-label">Active</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-value">{stats.suspendedOrganizations}</div>
+              <div className="stat-card-label">Suspended</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-value">{stats.totalUsers}</div>
+              <div className="stat-card-label">Users</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-value">{stats.totalFarmers}</div>
+              <div className="stat-card-label">Farmers</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-value">{stats.totalPickups}</div>
+              <div className="stat-card-label">Pickups</div>
+            </div>
+          </div>
+        )}
+
         {!loading && (
           <table className="registry-table">
             <thead>
               <tr>
                 <th>Organization</th>
                 <th>Slug</th>
+                <th>Created</th>
                 <th>Users</th>
                 <th>Farmers</th>
                 <th>Pickups</th>
@@ -82,9 +116,14 @@ export function PlatformAdminDashboardPage() {
             </thead>
             <tbody>
               {organizations.map((org) => (
-                <tr key={org.id}>
+                <tr
+                  key={org.id}
+                  className="clickable-row"
+                  onClick={() => navigate(`/platform-admin/organizations/${org.id}`)}
+                >
                   <td>{org.name}</td>
                   <td className="mono">{org.slug}</td>
+                  <td>{new Date(org.createdAt).toLocaleDateString()}</td>
                   <td>{org._count.users}</td>
                   <td>{org._count.farmers}</td>
                   <td>{org._count.pickupRequests}</td>
@@ -92,7 +131,14 @@ export function PlatformAdminDashboardPage() {
                     <span className={`status-badge status-${org.status.toLowerCase()}`}>{org.status}</span>
                   </td>
                   <td>
-                    <button className="btn-ghost btn-sm" disabled={busyId === org.id} onClick={() => toggleStatus(org)}>
+                    <button
+                      className="btn-ghost btn-sm"
+                      disabled={busyId === org.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleStatus(org);
+                      }}
+                    >
                       {org.status === "ACTIVE" ? "Suspend" : "Activate"}
                     </button>
                   </td>
@@ -100,7 +146,7 @@ export function PlatformAdminDashboardPage() {
               ))}
               {organizations.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="empty-state">
+                  <td colSpan={8} className="empty-state">
                     No organizations yet
                   </td>
                 </tr>

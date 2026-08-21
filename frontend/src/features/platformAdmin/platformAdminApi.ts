@@ -1,9 +1,19 @@
 import { apiFetch } from "../../lib/apiClient";
-import type { OrganizationWithCounts } from "../../types/api";
+import type { OrganizationDetail, OrganizationWithCounts, PlatformStats } from "../../types/api";
 
 export function listOrganizations() {
   return apiFetch<{ organizations: OrganizationWithCounts[] }>("/api/platform-admin/organizations").then(
     (r) => r.organizations,
+  );
+}
+
+export function getStats() {
+  return apiFetch<{ stats: PlatformStats }>("/api/platform-admin/organizations/stats").then((r) => r.stats);
+}
+
+export function getOrganization(id: string) {
+  return apiFetch<{ organization: OrganizationDetail }>(`/api/platform-admin/organizations/${id}`).then(
+    (r) => r.organization,
   );
 }
 

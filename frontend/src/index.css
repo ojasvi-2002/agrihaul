@@ -875,3 +875,67 @@ input {
 .platform-admin-login .login-card h1 {
   color: #1c2016;
 }
+
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: var(--surface);
+  padding: 14px 16px;
+}
+
+.stat-card-value {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.registry-table tr.clickable-row {
+  cursor: pointer;
+}
+
+.registry-table tr.clickable-row:hover {
+  background: var(--accent-bg);
+}
+
+.detail-back-link {
+  display: inline-block;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.detail-back-link:hover {
+  color: var(--text);
+}
+
+.detail-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+.detail-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 24px;
+}

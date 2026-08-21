@@ -91,6 +91,34 @@ describe("platform admin", () => {
     expect(org._count.users).toBe(1);
   });
 
+  it("returns platform-wide stats spanning every organization", async () => {
+    const res = await request(app).get("/api/platform-admin/organizations/stats").set("Cookie", adminCookie);
+    expect(res.status).toBe(200);
+    // Real aggregate counts, not fabricated — just confirm the target
+    // org (created in beforeAll) is actually reflected in the totals.
+    expect(res.body.stats.totalOrganizations).toBeGreaterThanOrEqual(1);
+    expect(res.body.stats.activeOrganizations).toBeGreaterThanOrEqual(1);
+    expect(res.body.stats.totalUsers).toBeGreaterThanOrEqual(1);
+    expect(typeof res.body.stats.totalFarmers).toBe("number");
+    expect(typeof res.body.stats.totalPickups).toBe("number");
+    expect(res.body.stats).not.toHaveProperty("revenue"); // no billing data exists — must not be fabricated
+  });
+
+  it("returns a richer per-organization detail view with team roster and phone numbers, but no payments data", async () => {
+    const res = await request(app)
+      .get(`/api/platform-admin/organizations/${testOrgId}`)
+      .set("Cookie", adminCookie);
+    expect(res.status).toBe(200);
+    expect(res.body.organization.id).toBe(testOrgId);
+    expect(res.body.organization.users).toHaveLength(1);
+    expect(res.body.organization.users[0].email).toBe(testOrgOwnerEmail);
+    expect(res.body.organization.users[0].passwordHash).toBeUndefined(); // never leaked
+    expect(res.body.organization.phoneNumbers).toEqual([]);
+    expect(res.body.organization._count.farms).toBe(0);
+    expect(res.body.organization).not.toHaveProperty("payments");
+    expect(res.body.organization).not.toHaveProperty("subscription");
+  });
+
   it("creates a new organization with an owner who can immediately log in", async () => {
     const email = `platform-admin-created-${Date.now()}@test.local`;
     const res = await request(app)
@@ -121,6 +149,14 @@ describe("platform admin", () => {
     // An already-issued session for that org is now blocked too.
     const blockedRes = await request(app).get("/api/farmers").set("Cookie", cookieBeforeSuspend);
     expect(blockedRes.status).toBe(403);
+
+    // The org-user realm's suspension check (requireAuth) must never
+    // bleed into the platform-admin realm — an admin still needs to see
+    // and manage a suspended org's detail, not be locked out of it too.
+    const detailWhileSuspended = await request(app)
+      .get(`/api/platform-admin/organizations/${testOrgId}`)
+      .set("Cookie", adminCookie);
+    expect(detailWhileSuspended.status).toBe(200);
 
     // A fresh login attempt is rejected immediately, with a clear
     // reason, rather than succeeding and then hitting a wall everywhere.

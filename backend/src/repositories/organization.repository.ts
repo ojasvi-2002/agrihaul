@@ -48,11 +48,71 @@ export function listAllOrganizations() {
   });
 }
 
+// Richer than the list view — real counts across every entity, the full
+// team roster, and configured phone numbers. No payments/billing data
+// here: that doesn't exist yet (CLAUDE.md §35 — not built until the
+// platform has paying customers), so this deliberately doesn't fabricate
+// a placeholder for it.
+const WITH_PLATFORM_DETAIL = {
+  _count: {
+    select: {
+      users: true,
+      farmers: true,
+      farms: true,
+      drivers: true,
+      vehicles: true,
+      conversations: true,
+      messages: true,
+      pickupRequests: true,
+    },
+  },
+  users: {
+    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    orderBy: { createdAt: "asc" as const },
+  },
+  phoneNumbers: {
+    select: { id: true, twilioPhoneNumber: true, friendlyName: true, active: true },
+  },
+};
+
 export function findOrganizationByIdForPlatform(id: string) {
-  return prisma.organization.findUnique({ where: { id }, include: WITH_PLATFORM_COUNTS });
+  return prisma.organization.findUnique({ where: { id }, include: WITH_PLATFORM_DETAIL });
+}
+
+// Most recent inbound-or-outbound message in the org — the simplest
+// honest signal of "is anyone actually using this," without inventing a
+// more elaborate activity model than CLAUDE.md's message-centric
+// platform already implies.
+export function findLastActivityForOrg(organizationId: string) {
+  return prisma.message.findFirst({
+    where: { organizationId },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
 }
 
 export async function updateOrganizationStatus(id: string, status: "ACTIVE" | "SUSPENDED") {
   const result = await prisma.organization.updateMany({ where: { id }, data: { status } });
   return result.count > 0;
+}
+
+// Platform-wide aggregate — a snapshot of the whole business, not any
+// one tenant. Real counts only; no revenue/payments figure since billing
+// doesn't exist yet.
+export async function getPlatformStats() {
+  const [totalOrganizations, activeOrganizations, totalUsers, totalFarmers, totalPickups] = await Promise.all([
+    prisma.organization.count(),
+    prisma.organization.count({ where: { status: "ACTIVE" } }),
+    prisma.user.count(),
+    prisma.farmer.count(),
+    prisma.pickupRequest.count(),
+  ]);
+  return {
+    totalOrganizations,
+    activeOrganizations,
+    suspendedOrganizations: totalOrganizations - activeOrganizations,
+    totalUsers,
+    totalFarmers,
+    totalPickups,
+  };
 }
