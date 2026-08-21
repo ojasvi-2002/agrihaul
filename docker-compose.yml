@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agrihaul
+      POSTGRES_PASSWORD: agrihaul
+      POSTGRES_DB: agrihaul
+    ports:
+      - "5432:5432"
+    volumes:
+      - agrihaul_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agrihaul -d agrihaul"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  agrihaul_postgres_data:

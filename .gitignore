@@ -17,6 +17,21 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Node (if you ever add a build step)
+# Node — used by frontend/ and backend/
 node_modules/
-package-lock.json
+dist/
+*.tsbuildinfo
+
+# Environment files with real secrets. .env.example (committed) documents
+# the required keys; backend/.env and frontend/.env hold real local values.
+.env
+.env.local
+!.env.example
+
+# Note: package-lock.json is intentionally NOT ignored for frontend/ and
+# backend/ — lockfiles should be committed so installs are reproducible.
+
+# Raw data exports for scripts/importFarmersFromCsv.ts and similar
+# migration scripts (CLAUDE.md §36) — these can contain real farmer PII
+# once migrating actual production data, never just test/demo CSVs.
+*.csv

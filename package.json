@@ -1,0 +1,40 @@
+{
+  "name": "agrihaulapp",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "db:generate": "prisma generate --schema=database/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema=database/prisma/schema.prisma",
+    "db:seed": "tsx database/prisma/seed.ts",
+    "db:studio": "prisma studio --schema=database/prisma/schema.prisma",
+    "db:reset": "prisma migrate reset --schema=database/prisma/schema.prisma",
+    "migrate:farmers": "tsx scripts/importFarmersFromCsv.ts",
+    "migrate:trucks": "tsx scripts/importTrucksFromCsv.ts",
+    "migrate:dispatch-log": "tsx scripts/importDispatchLogFromCsv.ts",
+    "create:platform-admin": "tsx scripts/createPlatformAdmin.ts"
+  },
+  "prisma": {
+    "seed": "tsx database/prisma/seed.ts"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "prisma": "^7.9.1",
+    "tsx": "^4.23.12"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "bcryptjs": "^3.0.3",
+    "csv-parse": "^7.0.2",
+    "pg": "^8.23.0"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.1"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.9.1": true,
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true,
+    "prisma@7.9.1": true
+  }
+}
