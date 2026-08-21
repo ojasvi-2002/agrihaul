@@ -143,4 +143,21 @@ describe("SMS pickup-request processing", () => {
     });
     expect(pickup?.farmId).toBe(farm.id);
   });
+
+  it("prefers an exact farm-name match over a substring match, regardless of creation order", async () => {
+    const farmer = await prisma.farmer.findFirst({ where: { organizationId, phoneNumber: FARMER_NUMBER } });
+    // Created first, so it would sort earlier in an order-dependent
+    // `.find()` — the exact match below must still win regardless.
+    await prisma.farm.create({ data: { organizationId, farmerId: farmer!.id, name: "North Farm" } });
+    const extension = await prisma.farm.create({
+      data: { organizationId, farmerId: farmer!.id, name: "North Farm Extension" },
+    });
+
+    await sendSms("Kwame - Yam - 120KG - North Farm Extension");
+
+    const pickup = await prisma.pickupRequest.findFirst({
+      where: { organizationId, farmerId: farmer!.id, status: "PENDING" },
+    });
+    expect(pickup?.farmId).toBe(extension.id);
+  });
 });
