@@ -3,7 +3,35 @@
 // ============================================================
 // All functions that build HTML table rows from data objects.
 // Column names match your AgriDispatch.xlsx exactly.
+//
+// FIXED IN THIS AUDIT:
+//   - Every field that can originate from a farmer's SMS, a driver's
+//     name, or the Add Farmer/Add Truck forms was being interpolated
+//     straight into innerHTML with no escaping. A farmer texting a
+//     "name" of e.g. <img src=x onerror=...> (or anyone submitting
+//     that through the Add Farmer modal) would have it execute in the
+//     ops dashboard — a stored XSS hole. Everything user-controlled
+//     now goes through escapeHtml() first.
+//   - Added a Delete action to the Farmers and Trucks tables (see
+//     requestDeleteFarmer() / requestDeleteTruck() in app.js). Dynamic
+//     values are passed via data-* attributes rather than interpolated
+//     into the onclick string, so a stray quote in a name/phone can't
+//     break out of the handler and inject arbitrary JS.
+//
+// ADDED: renderBroadcastRecipients() / filterBroadcastRecipients() /
+// renderBroadcastHistory() for the new Broadcast page (step 1 of the
+// outbound flow — ops messages farmers before they text in). Same
+// escapeHtml() discipline as everything else here, since farmer
+// Name/Village/Phone are still attacker-reachable via the Add Farmer
+// form or an SMS-registered farmer.
 // ============================================================
+
+// ── ESCAPING HELPER ───────────────────────────────────────────
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[ch]));
+}
 
 // ── DASHBOARD METRICS ────────────────────────────────────────
 function renderMetrics(farmers, trucks, dispatches) {
@@ -38,12 +66,12 @@ function renderRecentDispatches(dispatches) {
   if (!tbody) return;
   tbody.innerHTML = dispatches.slice(0, 8).map(d => `
     <tr>
-      <td class="mono">${d.Time}</td>
-      <td class="primary">${d.Farmer}</td>
-      <td>${d.Village}</td>
-      <td class="mono">${Number(d.WeightKG).toLocaleString()} kg</td>
-      <td>${d.Driver}</td>
-      <td class="mono">${d.DistanceKM} km</td>
+      <td class="mono">${escapeHtml(d.Time)}</td>
+      <td class="primary">${escapeHtml(d.Farmer)}</td>
+      <td>${escapeHtml(d.Village)}</td>
+      <td class="mono">${Number(d.WeightKG || 0).toLocaleString()} kg</td>
+      <td>${escapeHtml(d.Driver)}</td>
+      <td class="mono">${escapeHtml(d.DistanceKM)} km</td>
     </tr>`).join("");
 }
 
@@ -53,8 +81,8 @@ function renderDashTrucks(trucks) {
   if (!tbody) return;
   tbody.innerHTML = trucks.slice(0, 12).map(t => `
     <tr>
-      <td class="mono primary">${t.TruckID}</td>
-      <td>${t.DriverName.split(" ")[0]}</td>
+      <td class="mono primary">${escapeHtml(t.TruckID)}</td>
+      <td>${escapeHtml((t.DriverName || "").split(" ")[0])}</td>
       <td>${statusBadge(t.Status)}</td>
     </tr>`).join("");
 }
@@ -67,14 +95,14 @@ function renderDispatchTable(dispatches, highlightFirst = false) {
   if (!tbody) return;
   tbody.innerHTML = dispatches.map((d, i) => `
     <tr ${highlightFirst && i === 0 ? 'class="row-new"' : ""}>
-      <td class="mono">${d.Date}</td>
-      <td class="mono">${d.Time}</td>
-      <td class="primary">${d.Farmer}</td>
-      <td>${d.Village}</td>
-      <td class="mono">${Number(d.WeightKG).toLocaleString()}</td>
-      <td>${d.Driver}</td>
-      <td class="mono">${d.TruckID}</td>
-      <td class="mono">${d.DistanceKM} km</td>
+      <td class="mono">${escapeHtml(d.Date)}</td>
+      <td class="mono">${escapeHtml(d.Time)}</td>
+      <td class="primary">${escapeHtml(d.Farmer)}</td>
+      <td>${escapeHtml(d.Village)}</td>
+      <td class="mono">${Number(d.WeightKG || 0).toLocaleString()}</td>
+      <td>${escapeHtml(d.Driver)}</td>
+      <td class="mono">${escapeHtml(d.TruckID)}</td>
+      <td class="mono">${escapeHtml(d.DistanceKM)} km</td>
     </tr>`).join("");
 }
 
@@ -94,17 +122,24 @@ function renderTruckTable(trucks) {
   if (!tbody) return;
   tbody.innerHTML = trucks.map(t => `
     <tr>
-      <td class="mono primary">${t.TruckID}</td>
-      <td>${t.DriverName}</td>
-      <td class="mono" style="font-size:11px">${t.Phone}</td>
+      <td class="mono primary">${escapeHtml(t.TruckID)}</td>
+      <td>${escapeHtml(t.DriverName)}</td>
+      <td class="mono" style="font-size:11px">${escapeHtml(t.Phone)}</td>
       <td>${statusBadge(t.Status)}</td>
-      <td class="mono">${t.Lat}</td>
-      <td class="mono">${t.Lon}</td>
-      <td class="mono" style="font-size:11px">${t.LastUpdated}</td>
-      <td>
+      <td class="mono">${escapeHtml(t.Lat)}</td>
+      <td class="mono">${escapeHtml(t.Lon)}</td>
+      <td class="mono" style="font-size:11px">${escapeHtml(t.LastUpdated)}</td>
+      <td style="white-space:nowrap">
         <button class="btn btn-ghost btn-sm"
-          onclick="cycleStatus('${t.TruckID}')">
+          data-truck-id="${escapeHtml(t.TruckID)}"
+          onclick="cycleStatus(this.dataset.truckId)">
           Toggle
+        </button>
+        <button class="btn btn-danger btn-sm"
+          data-truck-id="${escapeHtml(t.TruckID)}"
+          data-truck-label="${escapeHtml(t.TruckID + ' — ' + (t.DriverName || ''))}"
+          onclick="requestDeleteTruck(this.dataset.truckId, this.dataset.truckLabel)">
+          Delete
         </button>
       </td>
     </tr>`).join("");
@@ -126,12 +161,20 @@ function renderFarmerTable(farmers) {
   if (!tbody) return;
   tbody.innerHTML = farmers.map(f => `
     <tr>
-      <td class="primary">${f.Name}</td>
-      <td class="mono" style="font-size:11px">${f.Phone}</td>
-      <td>${f.Village}</td>
-      <td class="mono">${f.Lat}</td>
-      <td class="mono">${f.Lon}</td>
-      <td class="mono" style="font-size:11px">${f.Registered}</td>
+      <td class="primary">${escapeHtml(f.Name)}</td>
+      <td class="mono" style="font-size:11px">${escapeHtml(f.Phone)}</td>
+      <td>${escapeHtml(f.Village)}</td>
+      <td class="mono">${escapeHtml(f.Lat)}</td>
+      <td class="mono">${escapeHtml(f.Lon)}</td>
+      <td class="mono" style="font-size:11px">${escapeHtml(f.Registered)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-danger btn-sm"
+          data-phone="${escapeHtml(f.Phone)}"
+          data-name="${escapeHtml(f.Name)}"
+          onclick="requestDeleteFarmer(this.dataset.phone, this.dataset.name)">
+          Delete
+        </button>
+      </td>
     </tr>`).join("");
 }
 
@@ -158,7 +201,7 @@ const REQUEST_STATUS = {
 
 function requestStatusBadge(status) {
   const s = REQUEST_STATUS[status] || REQUEST_STATUS.review;
-  return `<span class="badge ${s.cls}">${s.label}</span>`;
+  return `<span class="badge ${s.cls}">${escapeHtml(s.label)}</span>`;
 }
 
 let _allRequests = [];
@@ -169,18 +212,18 @@ function renderRequestsTable(queue, trucks) {
 
   const availableTrucks = (trucks || []).filter(t => t.Status === "Available");
   const truckOptions = availableTrucks
-    .map(t => `<option value="${t.TruckID}">${t.TruckID} — ${t.DriverName.split(" ")[0]}</option>`)
+    .map(t => `<option value="${escapeHtml(t.TruckID)}">${escapeHtml(t.TruckID)} — ${escapeHtml((t.DriverName || "").split(" ")[0])}</option>`)
     .join("");
 
   tbody.innerHTML = queue.map(r => {
     const f = r.fields;
     const parsedSummary = [f.name, f.product,
       f.quantity != null ? `${f.quantity} ${f.unit}` : null, f.location]
-      .filter(Boolean).join(" · ") || "—";
+      .filter(Boolean).map(escapeHtml).join(" · ") || "—";
 
     let actions = "";
     if (r.status === "review") {
-      actions = `<div class="form-hint" style="margin:0 0 4px">${r.issues.join(", ")}</div>
+      actions = `<div class="form-hint" style="margin:0 0 4px">${escapeHtml(r.issues.join(", "))}</div>
         <button class="btn btn-ghost btn-sm" onclick="discardRequest('${r.id}')">Discard</button>`;
     } else if (r.status === "duplicate") {
       actions = `<button class="btn btn-ghost btn-sm" onclick="confirmRequest('${r.id}')">Keep anyway</button>
@@ -199,9 +242,9 @@ function renderRequestsTable(queue, trucks) {
 
     return `
     <tr>
-      <td class="mono" style="font-size:11px">${r.receivedAt}</td>
-      <td class="mono" style="font-size:11px">${r.phone}</td>
-      <td class="mono" style="font-size:11px">${r.raw}</td>
+      <td class="mono" style="font-size:11px">${escapeHtml(r.receivedAt)}</td>
+      <td class="mono" style="font-size:11px">${escapeHtml(r.phone)}</td>
+      <td class="mono" style="font-size:11px">${escapeHtml(r.raw)}</td>
       <td>${parsedSummary}</td>
       <td>${requestStatusBadge(r.status)}</td>
       <td>${actions}</td>
@@ -224,6 +267,69 @@ function filterRequests() {
       .toLowerCase().includes(q)
   );
   renderRequestsTable(filtered, _allTrucks);
+}
+
+// ── BROADCAST — recipient picker ────────────────────────────────
+// Step 1 of the outbound flow: ops picks a message + a list of
+// farmers and sends it *before* any farmer has texted in. This is
+// the checkbox picker on the left of the Broadcast page; selection
+// state itself lives in js/app.js (_broadcastSelected), since it
+// needs to survive across re-renders (search, data refresh) within
+// a session.
+let _broadcastFarmers = []; // farmers currently shown in the picker (post-search)
+
+function renderBroadcastRecipients(farmers, selectedPhones) {
+  const wrap = document.getElementById("broadcastRecipientList");
+  if (!wrap) return;
+  _broadcastFarmers = farmers;
+
+  if (!farmers.length) {
+    wrap.innerHTML = `<div class="form-hint" style="padding:12px">No farmers match your search.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = farmers.map(f => {
+    const phone = f.Phone;
+    const checked = selectedPhones.has(phone) ? "checked" : "";
+    return `
+      <label class="broadcast-recipient-row">
+        <input type="checkbox" data-phone="${escapeHtml(phone)}"
+          ${checked} onchange="toggleBroadcastRecipient(this.dataset.phone, this.checked)">
+        <span class="primary">${escapeHtml(f.Name)}</span>
+        <span class="form-hint">${escapeHtml(f.Village || "—")} · ${escapeHtml(phone)}</span>
+      </label>`;
+  }).join("");
+}
+
+function filterBroadcastRecipients() {
+  const q = (document.getElementById("broadcastRecipientSearch")?.value || "").toLowerCase();
+  const filtered = _allFarmers.filter(f =>
+    `${f.Name} ${f.Village} ${f.Phone}`.toLowerCase().includes(q)
+  );
+  renderBroadcastRecipients(filtered, _broadcastSelected);
+}
+
+// ── BROADCAST — history table ────────────────────────────────────
+function renderBroadcastHistory(broadcasts) {
+  const tbody = document.getElementById("broadcastHistoryTable");
+  if (!tbody) return;
+  if (!broadcasts.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="form-hint">No broadcasts sent yet.</td></tr>`;
+    return;
+  }
+  const sorted = [...broadcasts].sort((a, b) => new Date(b.SentAt) - new Date(a.SentAt));
+  tbody.innerHTML = sorted.map(b => `
+    <tr>
+      <td class="mono" style="font-size:11px">${escapeHtml(formatBroadcastDate(b.SentAt))}</td>
+      <td>${escapeHtml(b.Message)}</td>
+      <td class="mono">${escapeHtml(b.RecipientCount)}${Number(b.FailedCount) ? ` <span style="color:var(--red)">(${escapeHtml(b.FailedCount)} failed)</span>` : ""}</td>
+      <td class="mono" style="font-size:11px">${escapeHtml(b.SentBy || "—")}</td>
+    </tr>`).join("");
+}
+
+function formatBroadcastDate(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso) : d.toLocaleString();
 }
 
 // ── SMALL UTILITIES ───────────────────────────────────────────

@@ -7,7 +7,31 @@
 # ============================================================
 
 # API keys — never commit this
-js/config.js
+#js/config.js
+
+# OS files
+#.DS_Store
+#Thumbs.db
+
+# Editor folders
+#.vscode/
+#.idea/
+
+# Node (if you ever add a build step)
+#node_modules/
+#package-lock.json
+
+
+# AgriHaul .gitignore
+# ============================================================
+# js/config.js is now safe to commit — Twilio credentials moved
+# to Apps Script Script Properties during the security audit and
+# are no longer stored here. What remains (Supabase anon key,
+# published Google Sheets CSV URLs, the Apps Script write URL) is
+# either designed to be public or already protected server-side
+# by Code.gs's requireRole() check. Committing it is required for
+# static hosts like GitHub Pages, which only serve tracked files.
+# ============================================================
 
 # OS files
 .DS_Store

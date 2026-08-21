@@ -1,3 +1,4 @@
+<!-- ============================================================ -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -22,7 +23,16 @@
 
 <!-- ============================================================
      LOGIN SCREEN — Farm/grass aesthetic with dark+light themes
-     Credentials: js/config.js → APP.DEMO_USERNAME / APP.DEMO_PASSWORD
+     Auth is handled by Supabase (js/auth.js). Three sign-in modes:
+     password, magic link, and email OTP — see setLoginMode() in
+     app.js. Sign-up additionally needs a Full name field, shown/
+     hidden by enterSignupView()/enterSigninView() in app.js.
+     FIXED: this card previously had no #loginModeTabs / #loginNameField
+     ids and no Full-name input, so the JS that shows/hides them for
+     sign-up silently found nothing; the "Create an account" link also
+     called doSignUp() directly instead of switching views, and the
+     submit button called doLogin() unconditionally — so sign-up could
+     never actually succeed. All three are fixed below.
      ============================================================ -->
 <div id="loginScreen">
   <button class="login-theme-btn" id="loginThemeBtn" onclick="toggleTheme()" title="Toggle dark/light mode">☀</button>
@@ -62,20 +72,51 @@
       <div class="particle" style="--x:91%;--d:1.7s;--s:2px"></div>
     </div>
   </div>
+
   <div class="login-card">
     <div class="login-leaf" aria-hidden="true">🌿</div>
     <div class="login-logo">AgriHaul</div>
     <div class="login-tagline">Operations Portal</div>
-    <div class="login-field">
-      <label>Username</label>
-      <input type="text" id="loginUser" placeholder="admin" autocomplete="username">
+
+    <!-- Sign-in mode tabs — clicking these calls setLoginMode() in app.js,
+         which shows/hides the password field vs the OTP field below.
+         Hidden entirely during sign-up (enterSignupView() targets this id). -->
+    <div class="login-tabs" id="loginModeTabs" style="display:flex;gap:6px;margin-bottom:18px">
+      <button class="btn btn-ghost btn-sm" onclick="setLoginMode('password')" id="tab-password">Password</button>
+      <button class="btn btn-ghost btn-sm" onclick="setLoginMode('magiclink')" id="tab-magiclink">Magic link</button>
+      <button class="btn btn-ghost btn-sm" onclick="setLoginMode('otp')" id="tab-otp">Email code</button>
     </div>
+
+    <!-- Shown only in sign-up view (enterSignupView() in app.js) -->
+    <div class="login-field" id="loginNameField" style="display:none">
+      <label>Full name</label>
+      <input type="text" id="loginName" placeholder="Jane Doe" autocomplete="name">
+    </div>
+
     <div class="login-field">
+      <label>Email</label>
+      <input type="email" id="loginEmail" placeholder="you@company.com" autocomplete="username">
+    </div>
+
+    <!-- Shown for "password" mode / sign-up, hidden for magic link / OTP -->
+    <div class="login-field" id="loginPassField">
       <label>Password</label>
       <input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password">
     </div>
-    <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign in →</button>
-    <p class="login-note">Demo: admin / agrihaulops2024</p>
+
+    <!-- Shown only after requesting an email code, in "otp" mode -->
+    <div class="login-field" id="loginOtpField" style="display:none">
+      <label>6-digit code</label>
+      <input type="text" id="loginOtp" placeholder="123456" inputmode="numeric" maxlength="6">
+    </div>
+
+    <!-- FIXED: was onclick="doLogin()" (always logged in, never signed up).
+         handleAuthSubmit() in app.js routes to doLogin() or doSignUp()
+         based on the current view. -->
+    <button class="login-btn" id="loginBtn" onclick="handleAuthSubmit()">Sign in →</button>
+    <!-- FIXED: was onclick="doSignUp();return false;" — clicking this used
+         to attempt a sign-up immediately instead of switching views. -->
+    <p class="login-note" id="loginStatus">New here? <a href="#" onclick="toggleAuthView();return false;">Create an account</a></p>
   </div>
 </div>
 
@@ -94,7 +135,8 @@
       AgriHaul
     </div>
     <div class="topbar-divider"></div>
-    <!-- Client name comes from CONFIG.APP.CLIENT_NAME -->
+    <!-- Client name comes from CONFIG.APP.CLIENT_NAME, or the logged-in
+         user's client_name from their Supabase profile if set. -->
     <div class="topbar-client" id="clientLabel">—</div>
 
     <div class="topbar-right">
@@ -109,6 +151,8 @@
   </header>
 
   <!-- ── SIDEBAR NAV ─────────────────────────────────────── -->
+  <!-- Items are shown/hidden per-role by applyRolePermissions() in
+       app.js, based on the ROLE_PAGES map in js/auth.js. -->
   <nav class="sidebar">
     <div class="nav-section-label">Monitor</div>
 
@@ -164,6 +208,29 @@
         <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
       </svg>
       Farmers
+    </div>
+
+    <!-- NEW: step 1 of the outbound flow — ops messages farmers
+         before any of them have texted in. Same role gate as the
+         other write actions (dispatcher/admin/super_admin); Code.gs
+         re-checks this server-side before anything actually sends. -->
+    <div class="nav-item" data-page="broadcast" onclick="showPage('broadcast', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+        <path d="M3 11l18-6v14L3 13z"/>
+        <path d="M11 15l1 5a2 2 0 0 1-4 0l-.5-4"/>
+      </svg>
+      Broadcast
+    </div>
+
+    <!-- Only rendered visible for role === 'super_admin' (applyRolePermissions()
+         in app.js hides any data-page not in ROLE_PAGES[currentRole]). -->
+    <div class="nav-section-label">Admin</div>
+    <div class="nav-item" data-page="users" onclick="showPage('users', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+        <path d="M12 2l7 3v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V5l7-3z"/>
+        <path d="M9.5 12l1.8 1.8L15 10"/>
+      </svg>
+      Users
     </div>
 
     <div class="nav-section-label">Account</div>
@@ -265,12 +332,6 @@
 
 
     <!-- ================================================== -->
-    <!--  PAGE: LIVE MAP                                    -->
-    <!--  Pins rendered by js/map.js using Lat/Lon from     -->
-    <!--  your Google Sheet.                                -->
-    <!--  MAP_BOUNDS in map.js covers West Africa.          -->
-    <!-- ================================================== -->
-    <!-- ================================================== -->
     <!--  PAGE: REQUESTS                                    -->
     <!--  Source: Requests sheet (raw inbound SMS, Phone/    -->
     <!--  Raw/ReceivedAt), parsed client-side in intake.js.  -->
@@ -312,6 +373,12 @@
     </div><!-- /requests -->
 
 
+    <!-- ================================================== -->
+    <!--  PAGE: LIVE MAP                                    -->
+    <!--  Pins rendered by js/map.js using Lat/Lon from     -->
+    <!--  your Google Sheet.                                -->
+    <!--  MAP_BOUNDS in map.js covers West Africa.          -->
+    <!-- ================================================== -->
     <div class="page" id="page-map">
       <div class="page-header">
         <div>
@@ -422,12 +489,127 @@
         <table>
           <thead><tr>
             <th>Name</th><th>Phone</th><th>Village</th>
-            <th>Lat</th><th>Lon</th><th>Registered</th>
+            <th>Lat</th><th>Lon</th><th>Registered</th><th></th>
           </tr></thead>
           <tbody id="farmerTable"></tbody>
         </table>
       </div>
     </div><!-- /farmers -->
+
+
+    <!-- ================================================== -->
+    <!--  PAGE: BROADCAST                                   -->
+    <!--  Step 1 of the "Working" flow: ops sends a message  -->
+    <!--  to farmers asking what they have ready to sell,    -->
+    <!--  before farmers reply with their own NAME-PRODUCT-  -->
+    <!--  QUANTITY-LOCATION message (see the Requests page).  -->
+    <!--  Sends via Code.gs → sendBroadcast → Twilio, looping -->
+    <!--  once per selected farmer's phone number.            -->
+    <!-- ================================================== -->
+    <div class="page" id="page-broadcast">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Broadcast</div>
+          <div class="page-subtitle">Message farmers first · e.g. "we're buying this week"</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <!-- Recipient picker -->
+        <div>
+          <div class="section-head">
+            <div class="section-title">Recipients</div>
+            <div class="section-rule"></div>
+          </div>
+          <div class="table-card" style="padding:14px">
+            <div class="search-row" style="margin-bottom:10px">
+              <input class="search-input" type="text" id="broadcastRecipientSearch"
+                placeholder="Search name, village, phone…"
+                oninput="filterBroadcastRecipients()">
+            </div>
+            <div class="form-actions" style="margin-bottom:10px">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer">
+                <input type="checkbox" checked onchange="toggleBroadcastAll(this.checked)"> Select all shown
+              </label>
+            </div>
+            <div id="broadcastRecipientList" style="max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:2px"></div>
+          </div>
+        </div>
+
+        <!-- Composer -->
+        <div>
+          <div class="section-head">
+            <div class="section-title">Message</div>
+            <div class="section-rule"></div>
+          </div>
+          <div class="table-card" style="padding:16px">
+            <textarea id="broadcastMessage" class="form-input" rows="6" style="width:100%; resize:vertical; font-family:var(--font-mono); font-size:12px;"
+              placeholder="Hi! AgriHaul here — we're buying this week. Reply: NAME - PRODUCT - QUANTITY - LOCATION"
+              oninput="updateBroadcastCharCount()"></textarea>
+            <div class="form-hint" id="broadcastCharCount" style="margin:6px 0 16px">0 chars · 1 SMS segment</div>
+            <div class="form-actions" style="flex-wrap:wrap">
+              <button class="btn btn-ghost" onclick="insertBroadcastTemplate()">Use template</button>
+              <button class="btn btn-primary" id="broadcastSendBtn" onclick="requestSendBroadcast()" disabled>
+                Send to <span id="broadcastRecipientCount">0</span> farmers
+              </button>
+            </div>
+            <div class="form-hint" style="margin-top:12px">Sends one SMS per selected farmer via Twilio, relayed through Code.gs — your Twilio credentials never touch the browser.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">Recent broadcasts</div>
+        <div class="section-rule"></div>
+      </div>
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Sent</th><th>Message</th><th>Recipients</th><th>Sent by</th></tr></thead>
+          <tbody id="broadcastHistoryTable"></tbody>
+        </table>
+      </div>
+    </div><!-- /broadcast -->
+
+
+    <!-- ================================================== -->
+    <!--  PAGE: USERS  (super_admin only)                   -->
+    <!--  Add/remove teammates and change their role. Talks -->
+    <!--  to Code.gs (listUsers/inviteUser/updateUserRole/  -->
+    <!--  removeUser), which uses the Supabase service_role -->
+    <!--  key server-side — that key never touches the      -->
+    <!--  browser. See js/app.js loadUsers()/inviteUser-     -->
+    <!--  Submit()/changeUserRole()/requestRemoveUser().     -->
+    <!-- ================================================== -->
+    <div class="page" id="page-users">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Team & Access</div>
+          <div class="page-subtitle">Super admin only · who can sign in, and what they can do</div>
+        </div>
+      </div>
+
+      <div class="table-card" style="padding:16px; margin-bottom:16px;">
+        <label class="form-label" for="inviteEmail">Invite a new user</label>
+        <div class="form-actions" style="margin-top:8px; flex-wrap:wrap;">
+          <input class="form-input" type="email" id="inviteEmail" placeholder="teammate@company.com" style="flex:1; min-width:220px;">
+          <select class="form-select" id="inviteRole" style="width:170px;">
+            <option value="viewer">Viewer</option>
+            <option value="dispatcher">Dispatcher</option>
+            <option value="admin">Admin</option>
+            <option value="super_admin">Super admin</option>
+          </select>
+          <button class="btn btn-primary" onclick="inviteUserSubmit()">Send invite</button>
+        </div>
+        <div class="form-hint" style="margin-top:8px">They'll get an email to set a password and sign in. New accounts default to Viewer unless you pick a different role here.</div>
+      </div>
+
+      <div class="table-card">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
+          <tbody id="usersTable"></tbody>
+        </table>
+      </div>
+    </div><!-- /users -->
 
   </main>
 </div><!-- /mainApp -->
@@ -435,9 +617,10 @@
 
 <!-- ============================================================
      MODAL: ADD TRUCK
-     Adds to local state. To persist, add a Google Sheets API
-     write call in addTruck() in app.js, or have ops staff
-     add rows directly to the Google Sheet.
+     Adds to local state, then writes through to the Trucks tab via
+     the Apps Script endpoint (Code.gs), carrying the logged-in
+     user's Supabase access token so the write can be role-checked
+     server-side. See addTruck() in app.js / postToSheet() in data.js.
      ============================================================ -->
 <div class="modal-overlay" id="modal-addTruck">
   <div class="modal">
@@ -522,28 +705,97 @@
   </div>
 </div>
 
+<!-- ============================================================
+     MODAL: CONFIRM DELETE  (shared by farmers, trucks, and users)
+     FIXED: app.js already called openModal('confirmDelete') and
+     referenced #confirmDeleteTitle / #confirmDeleteBody /
+     #confirmDeleteBtn, but this modal never existed in the page —
+     so every Delete click silently did nothing. Added here, wired
+     to runConfirmedDelete() in app.js, which branches on
+     _pendingDelete.type ("farmer" | "truck" | "user").
+     ============================================================ -->
+<div class="modal-overlay" id="modal-confirmDelete">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <div class="modal-title" id="confirmDeleteTitle">Delete?</div>
+      <button class="modal-close" onclick="closeModal('confirmDelete')">✕</button>
+    </div>
+    <p id="confirmDeleteBody" style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-bottom:18px"></p>
+    <div class="form-actions">
+      <button class="btn btn-danger" id="confirmDeleteBtn" onclick="runConfirmedDelete()">Delete</button>
+      <button class="btn btn-ghost"  onclick="closeModal('confirmDelete')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     MODAL: CONFIRM BROADCAST
+     A broadcast fans out real SMS to potentially dozens of farmers
+     at once with no per-recipient "are you sure" — unlike a single
+     dispatch, there's no cheap undo, so this confirms the recipient
+     count + exact message before Code.gs starts looping Twilio sends.
+     ============================================================ -->
+<div class="modal-overlay" id="modal-confirmBroadcast">
+  <div class="modal" style="width:460px">
+    <div class="modal-header">
+      <div class="modal-title">Send broadcast?</div>
+      <button class="modal-close" onclick="closeModal('confirmBroadcast')">✕</button>
+    </div>
+    <p style="font-size:13px;line-height:1.6;color:var(--text-secondary);margin-bottom:14px">
+      This sends a real SMS to <strong id="confirmBroadcastCount">0</strong> farmers right now. This can't be undone.
+    </p>
+    <div class="table-card" style="padding:12px;margin-bottom:18px;background:var(--bg-raised)">
+      <div class="form-hint" style="margin-bottom:4px">Message preview</div>
+      <div id="confirmBroadcastPreview" style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" id="confirmBroadcastBtn" onclick="sendBroadcastConfirmed()">Send now</button>
+      <button class="btn btn-ghost" onclick="closeModal('confirmBroadcast')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast notification -->
 <div class="toast" id="toast"></div>
 
 
 <!-- ============================================================
      SCRIPTS — load order matters:
-     1. config.js   — must be first (CONFIG object)
-     2. data.js     — uses CONFIG, exports loadAllData / sendSMS
-     3. map.js      — uses statusClass from data.js
-     4. tables.js   — uses statusBadge from data.js
-     5. app.js      — uses everything above
+     0. supabase-js CDN — must load before auth.js, which uses it
+     1. config.js   — must be first of your own files (CONFIG object)
+     2. auth.js     — Supabase login + RBAC, used by app.js
+     3. data.js     — uses CONFIG, exports loadAllData / sendSMS
+     4. intake.js   — SMS parsing, defines SEED_REQUESTS
+     5. map.js      — uses statusClass from data.js
+     6. tables.js   — uses statusBadge from data.js
+     7. app.js      — uses everything above
 
      TO CONNECT GOOGLE SHEETS:
        Edit js/config.js → SHEETS.FARMERS_URL / TRUCKS_URL / DISPATCH_URL
+       (and optionally BROADCASTS_URL, if you want sent broadcasts to
+       persist across refreshes — see js/data.js)
 
      TO ENABLE SMS:
-       Edit js/config.js → TWILIO keys
+       Twilio keys live in Apps Script Script Properties (Code.gs),
+       NOT in js/config.js — the dashboard sends SMS by calling
+       SHEETS.WRITE_URL with action "sendSms" (or "sendBroadcast" for
+       the Broadcast page), which Code.gs relays to Twilio server-side.
 
      TO ENABLE MAKE.COM AUTO-DISPATCH:
        Edit js/config.js → MAKE.WEBHOOK_URL
+
+     TO CONFIGURE LOGIN:
+       Edit js/config.js → SUPABASE.URL / SUPABASE.ANON_KEY
+       (Supabase Dashboard → Settings → API)
+
+     TO MANAGE USERS (super_admin):
+       Code.gs needs SUPABASE_SERVICE_ROLE_KEY as a Script Property
+       (Project Settings → Script Properties) — this key is never
+       sent to the browser. See the "Users" page.
      ============================================================ -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/config.js"></script>
+<script src="js/auth.js"></script>
 <script src="js/data.js"></script>
 <script src="js/intake.js"></script>
 <script src="js/map.js"></script>
