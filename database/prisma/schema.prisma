@@ -1,0 +1,405 @@
+// AgriHaul database schema — Phase 2.
+// Core entities per CLAUDE.md §11-§21. organizationId is the tenant
+// boundary on every organization-owned model (CLAUDE.md §22).
+//
+// Vehicle carries two dispatch-model fields (currentLatitude/Longitude,
+// locationSource, locationUpdatedAt) beyond CLAUDE.md's example field list,
+// to support the GPS-or-SMS-reported nearest-truck recommendation flow
+// decided with the developer (see project memory "dispatch-model-decision").
+// The broadcast/query tracking tables that flow also needs are deferred to
+// Phase 7/8 rather than built now — see the developer report for why.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/.prisma/client"
+}
+
+// Connection URL now lives in prisma.config.ts (repo root) — Prisma 7
+// no longer supports `url` directly in the schema's datasource block.
+datasource db {
+  provider = "postgresql"
+}
+
+// ── ENUMS ──────────────────────────────────────────────────────
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  DISPATCHER
+  DRIVER
+}
+
+enum CommunicationChannel {
+  SMS
+}
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageProvider {
+  TWILIO
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  UNDELIVERED
+  RECEIVED
+}
+
+enum PickupRequestStatus {
+  PENDING
+  CONFIRMED
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum DriverStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  EN_ROUTE
+  MAINTENANCE
+  INACTIVE
+}
+
+enum VehicleLocationSource {
+  GPS
+  SMS_REPORTED
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ── ORGANIZATION ───────────────────────────────────────────────
+
+model Organization {
+  id        String             @id @default(cuid())
+  name      String
+  slug      String             @unique
+  status    OrganizationStatus @default(ACTIVE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  users          User[]
+  farmers        Farmer[]
+  farms          Farm[]
+  conversations  Conversation[]
+  messages       Message[]
+  pickupRequests PickupRequest[]
+  drivers        Driver[]
+  vehicles       Vehicle[]
+  assignments    Assignment[]
+  phoneNumbers   OrganizationPhoneNumber[]
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  email          String   @unique
+  passwordHash   String
+  role           UserRole
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sessions     Session[]
+
+  @@index([organizationId])
+}
+
+// Server-side session. The cookie holds a random opaque token; only its
+// SHA-256 hash is stored here, so a database read alone can't be replayed
+// as a valid session. Logout deletes the row for immediate revocation.
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ── FARMERS & FARMS ────────────────────────────────────────────
+
+model Farmer {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  phoneNumber    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  farms          Farm[]
+  conversations  Conversation[]
+  pickupRequests PickupRequest[]
+
+  @@unique([organizationId, phoneNumber])
+  @@index([organizationId])
+}
+
+model Farm {
+  id             String   @id @default(cuid())
+  organizationId String
+  farmerId       String
+  name           String
+  address        String?
+  latitude       Float?
+  longitude      Float?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  farmer         Farmer          @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  pickupRequests PickupRequest[]
+
+  @@index([organizationId])
+  @@index([farmerId])
+}
+
+// ── CONVERSATIONS & MESSAGES ───────────────────────────────────
+
+model Conversation {
+  id             String               @id @default(cuid())
+  organizationId String
+  farmerId       String
+  channel        CommunicationChannel @default(SMS)
+  status         ConversationStatus   @default(OPEN)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  farmer         Farmer          @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  messages       Message[]
+  pickupRequests PickupRequest[] @relation("PickupSourceConversation")
+
+  @@index([organizationId])
+  @@index([farmerId])
+}
+
+model Message {
+  id                String               @id @default(cuid())
+  organizationId    String
+  conversationId    String
+  direction         MessageDirection
+  channel           CommunicationChannel @default(SMS)
+  sender            String
+  recipient         String
+  body              String
+  provider          MessageProvider      @default(TWILIO)
+  providerMessageId String?
+  status            MessageStatus
+  receivedAt        DateTime?
+  sentAt            DateTime?
+  // Set when the SMS parser (Phase 7) recognizes this as an attempted
+  // pickup request that couldn't be parsed with confidence — flagged for
+  // a dispatcher rather than guessing at missing/invalid fields (§29).
+  needsReview       Boolean              @default(false)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversation   Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  pickupRequests PickupRequest[] @relation("PickupSourceMessage")
+
+  // Prevents duplicate Twilio webhook deliveries from creating duplicate
+  // message rows (CLAUDE.md §26). Multiple NULLs are allowed by Postgres,
+  // so this doesn't constrain not-yet-sent outbound messages.
+  @@unique([provider, providerMessageId])
+  @@index([organizationId])
+  @@index([conversationId])
+}
+
+// ── PICKUP REQUESTS ────────────────────────────────────────────
+
+model PickupRequest {
+  id                   String              @id @default(cuid())
+  organizationId       String
+  farmerId             String
+  farmId               String?
+  sourceConversationId String?
+  sourceMessageId      String?
+  // Parsed from the SMS (§7's "product" field) but never had a place to
+  // land on this model until now — was being silently dropped.
+  product              String?
+  // The location as the farmer typed it, kept even when it didn't match
+  // any known Farm (so dispatch can still show/broadcast *something*
+  // human-readable — never invented coordinates for it, see farm.latitude).
+  locationText         String?
+  quantity             Float?
+  unit                 String?
+  requestedPickupDate  DateTime?
+  status               PickupRequestStatus @default(PENDING)
+  notes                String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  farmer              Farmer        @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  farm                Farm?         @relation(fields: [farmId], references: [id], onDelete: SetNull)
+  sourceConversation  Conversation? @relation("PickupSourceConversation", fields: [sourceConversationId], references: [id], onDelete: SetNull)
+  sourceMessage       Message?      @relation("PickupSourceMessage", fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  assignments         Assignment[]
+
+  @@index([organizationId])
+  @@index([farmerId])
+  @@index([status])
+}
+
+// ── DRIVERS & VEHICLES ─────────────────────────────────────────
+
+model Driver {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  phoneNumber    String
+  status         DriverStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments     Assignment[]
+  primaryVehicle  Vehicle?
+
+  @@unique([organizationId, phoneNumber])
+  @@index([organizationId])
+}
+
+model Vehicle {
+  id                 String        @id @default(cuid())
+  organizationId     String
+  name               String
+  registrationNumber String
+  capacity           Float?
+  status             VehicleStatus @default(AVAILABLE)
+
+  // The driver whose phone reports this vehicle's location via SMS when
+  // GPS isn't available — resolves which vehicle a driver's "LOC" reply
+  // belongs to. Nullable/unique: at most one vehicle per driver.
+  primaryDriverId String? @unique
+  primaryDriver   Driver? @relation(fields: [primaryDriverId], references: [id], onDelete: SetNull)
+
+  // Current location for nearest-truck dispatch recommendation. Set
+  // automatically when GPS is available, or from a driver's SMS location
+  // reply otherwise — see project memory "dispatch-model-decision".
+  currentLatitude   Float?
+  currentLongitude  Float?
+  locationSource    VehicleLocationSource?
+  locationUpdatedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments  Assignment[]
+
+  @@unique([organizationId, registrationNumber])
+  @@index([organizationId])
+}
+
+// ── ASSIGNMENTS ────────────────────────────────────────────────
+
+model Assignment {
+  id              String           @id @default(cuid())
+  organizationId  String
+  pickupRequestId String
+  driverId        String
+  vehicleId       String
+  status          AssignmentStatus @default(ASSIGNED)
+  assignedAt      DateTime         @default(now())
+  completedAt     DateTime?
+  // Actual distance covered, when known (from the old prototype's
+  // DispatchLog.DistanceKM, or computable going forward from the same
+  // Haversine logic used for recommendations).
+  distanceKm      Float?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pickupRequest PickupRequest @relation(fields: [pickupRequestId], references: [id], onDelete: Cascade)
+  driver        Driver        @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  vehicle       Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([pickupRequestId])
+  @@index([driverId])
+  @@index([vehicleId])
+}
+
+// ── TWILIO PHONE NUMBERS ───────────────────────────────────────
+
+model OrganizationPhoneNumber {
+  id                String   @id @default(cuid())
+  organizationId    String
+  phoneNumber       String
+  twilioPhoneNumber String   @unique
+  friendlyName      String?
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+// ── PLATFORM ADMINISTRATION ─────────────────────────────────────
+// CLAUDE.md §34: platform admins operate AgriHaul itself, across every
+// organization — they are not a role on User, and deliberately don't
+// have an organizationId. Reusing the org-scoped User/Session models
+// for them would blur exactly the line CLAUDE.md says to keep separate,
+// so this is its own identity and session realm end to end: its own
+// model, its own hashed-token sessions, its own auth routes
+// (/api/platform-admin/auth/*), its own cookie, its own frontend area.
+// No self-serve signup — provisioned via scripts/createPlatformAdmin.ts.
+
+model PlatformAdmin {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions PlatformAdminSession[]
+}
+
+model PlatformAdminSession {
+  id              String   @id @default(cuid())
+  platformAdminId String
+  tokenHash       String   @unique
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime
+
+  platformAdmin PlatformAdmin @relation(fields: [platformAdminId], references: [id], onDelete: Cascade)
+
+  @@index([platformAdminId])
+}
