@@ -74,6 +74,19 @@ export async function updatePickupRequest(
     status?: "PENDING" | "CONFIRMED" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
   },
 ) {
-  const result = await prisma.pickupRequest.updateMany({ where: { id, organizationId }, data });
+  const isTerminalTransition = data.status === "COMPLETED" || data.status === "CANCELLED";
+  const result = await prisma.pickupRequest.updateMany({
+    where: {
+      id,
+      organizationId,
+      // Only complete/cancel from a still-open state — makes a second,
+      // concurrent completion attempt (a redelivered driver DONE
+      // webhook, a double-click) affect zero rows instead of silently
+      // re-running whatever the caller does next (e.g. a duplicate
+      // "your pickup is complete" SMS to the farmer).
+      ...(isTerminalTransition ? { status: { notIn: ["COMPLETED", "CANCELLED"] } } : {}),
+    },
+    data,
+  });
   return result.count > 0;
 }

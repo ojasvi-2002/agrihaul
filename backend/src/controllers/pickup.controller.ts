@@ -27,12 +27,16 @@ export async function updatePickup(req: Request, res: Response) {
   const parsed = updatePickupRequestSchema.safeParse(req.body);
   if (!parsed.success) return sendError(res, 400, "Invalid pickup request data");
 
-  const updated = await pickupService.updatePickupRequest(
+  const result = await pickupService.updatePickupRequest(
     req.user!.organizationId,
     idParam(req),
     parsed.data,
   );
-  if (!updated) return notFound(res, "Pickup request");
+  // `found` is what matters for 404 here — `transitioned` can be false
+  // on a no-op (e.g. re-completing an already-completed pickup), which
+  // is still a successful response: the pickup exists and is in the
+  // requested state, just not because of this particular request.
+  if (!result.found) return notFound(res, "Pickup request");
 
   const pickup = await pickupService.getPickupRequest(req.user!.organizationId, idParam(req));
   res.json({ pickup });

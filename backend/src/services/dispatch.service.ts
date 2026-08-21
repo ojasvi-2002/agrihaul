@@ -171,7 +171,13 @@ export async function handleDriverMessage(
     // triggers (frees the vehicle, closes the assignment) — one place
     // owns "what completing a pickup means", whether a dispatcher or a
     // driver's SMS is what triggered it.
-    await updatePickupRequest(organizationId, assignment.pickupRequestId, { status: "COMPLETED" });
+    const result = await updatePickupRequest(organizationId, assignment.pickupRequestId, { status: "COMPLETED" });
+
+    // `transitioned` is false if this DONE lost a race (a redelivered
+    // Twilio webhook, a double-send) against another request that
+    // already completed the same pickup — that earlier call already
+    // sent the farmer notification, so this one must not send it again.
+    if (!result.transitioned) return { action: "noActiveAssignment" };
 
     const pickup = await findPickupRequestById(organizationId, assignment.pickupRequestId);
     if (pickup) {

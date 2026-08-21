@@ -357,4 +357,57 @@ describe("dispatch: recommendation, broadcast, driver location, assignment", () 
     const res = await request(server).post("/webhooks/twilio/incoming").set("X-Twilio-Signature", signature).type("form").send(params);
     expect(res.status).toBe(200); // still acked, nothing crashes
   });
+
+  it("two concurrent DONE deliveries for the same job complete it only once (one farmer notification, not two)", async () => {
+    const racePickup = await prisma.pickupRequest.create({
+      data: { organizationId, farmerId, farmId, product: "Yam", quantity: 80, unit: "KG" },
+    });
+    const raceDriver = await prisma.driver.create({
+      data: { organizationId, name: "Race Done Driver", phoneNumber: "+15559998881" },
+    });
+    const raceVehicle = await prisma.vehicle.create({
+      data: {
+        organizationId,
+        name: "Race Done Truck",
+        registrationNumber: "REG-DONE-RACE",
+        primaryDriverId: raceDriver.id,
+      },
+    });
+    await request(app)
+      .post(`/api/pickups/${racePickup.id}/assign`)
+      .set("Cookie", dispatcherCookie)
+      .send({ driverId: raceDriver.id, vehicleId: raceVehicle.id });
+
+    const conversation = await prisma.conversation.findFirst({ where: { organizationId, farmerId } });
+    const beforeCount = await prisma.message.count({
+      where: { conversationId: conversation!.id, direction: "OUTBOUND", body: { contains: "completed" } },
+    });
+
+    // Same MessageSid on both — simulates a redelivered Twilio webhook,
+    // though the underlying bug is identical for two distinct driver
+    // texts: driver messages get no providerMessageId dedup at all
+    // (twilioWebhook.service.ts), so the atomic guard in
+    // pickupRequest.repository.ts is what has to catch this, not dedup.
+    const url = `${baseUrl}/webhooks/twilio/incoming`;
+    const params = { To: ORG_TWILIO_NUMBER, From: raceDriver.phoneNumber, Body: "DONE", MessageSid: "SM_driver_done_race" };
+    const signature = computeTwilioSignature(url, params);
+
+    const [resA, resB] = await Promise.all([
+      request(server).post("/webhooks/twilio/incoming").set("X-Twilio-Signature", signature).type("form").send(params),
+      request(server).post("/webhooks/twilio/incoming").set("X-Twilio-Signature", signature).type("form").send(params),
+    ]);
+    expect(resA.status).toBe(200);
+    expect(resB.status).toBe(200);
+
+    const pickupAfter = await prisma.pickupRequest.findUnique({ where: { id: racePickup.id } });
+    expect(pickupAfter?.status).toBe("COMPLETED");
+
+    const vehicleAfter = await prisma.vehicle.findUnique({ where: { id: raceVehicle.id } });
+    expect(vehicleAfter?.status).toBe("AVAILABLE");
+
+    const afterCount = await prisma.message.count({
+      where: { conversationId: conversation!.id, direction: "OUTBOUND", body: { contains: "completed" } },
+    });
+    expect(afterCount - beforeCount).toBe(1); // exactly one "completed" notification, not two
+  });
 });
