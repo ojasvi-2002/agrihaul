@@ -90,6 +90,14 @@ describe("parseIncomingSms", () => {
       requestedPickupDate: null,
     });
   });
+
+  it("flags a zero quantity for review instead of creating an empty pickup", () => {
+    const result = parseIncomingSms("KWAME - MAIZE - 0KG - AJUMAKO");
+    expect(result.intent).toBe("PICKUP_REQUEST");
+    if (result.intent !== "PICKUP_REQUEST") throw new Error("expected pickup intent");
+    expect(result.confident).toBe(false);
+    expect(result.issues).toContain("quantity must be greater than zero");
+  });
 });
 
 describe("extractDate", () => {
@@ -112,5 +120,17 @@ describe("extractDate", () => {
 
   it("rejects an invalid date rather than rolling it over", () => {
     expect(extractDate("31/02", monday)).toBeNull(); // no Feb 31st
+  });
+
+  it("refuses to guess a genuinely ambiguous DD/MM-vs-MM/DD date", () => {
+    // 03/04 is valid either way: April 3rd (day-first) or March 4th
+    // (month-first) — no way to know which the farmer meant.
+    expect(extractDate("03/04", monday)).toBeNull();
+  });
+
+  it("still resolves an unambiguous numeric date even when day <= 12", () => {
+    // 05/05 reads the same regardless of which number is "day" — not
+    // ambiguous just because both numbers happen to be <= 12.
+    expect(extractDate("05/05", monday)).toEqual(new Date(2026, 4, 5));
   });
 });

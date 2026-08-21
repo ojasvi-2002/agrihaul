@@ -95,11 +95,29 @@ export function extractDate(token: string | undefined, referenceDate: Date = new
 
   const dm = t.match(/^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$/);
   if (dm) {
-    const [, dayS, monS, yearS] = dm;
-    const mon = Number(monS);
+    const [, aStr, bStr, yearS] = dm;
+    const a = Number(aStr);
+    const b = Number(bStr);
     const year = yearS ? (yearS.length === 2 ? 2000 + Number(yearS) : Number(yearS)) : referenceDate.getFullYear();
-    const d = new Date(year, mon - 1, Number(dayS));
-    return isValidDate(d) && d.getMonth() === mon - 1 ? d : null;
+
+    // This format is read day-first (matching the NAME - PRODUCT - QTY -
+    // LOCATION - DATE examples this parser was built against). But when
+    // the two numbers could *also* be read month-first and that swap
+    // lands on a different, equally valid calendar date, there's no way
+    // to know which the farmer meant — guessing risks creating a
+    // PickupRequest for the wrong day with no review flag, which is
+    // exactly what §29 says never to do. Only trust the day-first
+    // reading when it's the only valid one.
+    const dayFirst = new Date(year, b - 1, a);
+    const dayFirstValid = isValidDate(dayFirst) && dayFirst.getMonth() === b - 1;
+
+    if (a !== b) {
+      const monthFirst = new Date(year, a - 1, b);
+      const monthFirstValid = isValidDate(monthFirst) && monthFirst.getMonth() === a - 1;
+      if (dayFirstValid && monthFirstValid) return null;
+    }
+
+    return dayFirstValid ? dayFirst : null;
   }
 
   return null;
@@ -176,6 +194,10 @@ export function parseIncomingSms(raw: string, referenceDate: Date = new Date()):
   if (!qtyRaw) issues.push("missing quantity");
   const quantity = extractQuantity(qtyRaw);
   if (qtyRaw && !quantity) issues.push("quantity not numeric");
+  // extractQuantity("0KG") returns a truthy {value: 0, unit: "KG"} —
+  // check the actual value, not just object presence, or a zero-quantity
+  // pickup request would confidently create a PickupRequest for nothing.
+  if (quantity && quantity.value <= 0) issues.push("quantity must be greater than zero");
   if (!locationRaw) issues.push("missing location");
 
   const requestedPickupDate = extractDate(dateRaw, referenceDate);
