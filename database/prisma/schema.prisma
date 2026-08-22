@@ -118,6 +118,7 @@ model Organization {
   assignments    Assignment[]
   phoneNumbers   OrganizationPhoneNumber[]
   teamInvites    TeamInvite[]
+  impersonationLogs ImpersonationLog[]
 }
 
 model User {
@@ -133,6 +134,11 @@ model User {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sessions     Session[]
   sentInvites  TeamInvite[]
+  // The other side of "OWNER/ADMIN views as this employee" — see Session
+  // and ImpersonationLog below.
+  impersonatedInSessions    Session[]          @relation("SessionImpersonationTarget")
+  impersonationLogsAsAdmin  ImpersonationLog[]  @relation("ImpersonationLogAdmin")
+  impersonationLogsAsTarget ImpersonationLog[]  @relation("ImpersonationLogTarget")
 
   @@index([organizationId])
 }
@@ -172,9 +178,39 @@ model Session {
   createdAt DateTime @default(now())
   expiresAt DateTime
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Set while an OWNER/ADMIN is "viewing as" one of their own DISPATCHER
+  // employees ("View as" mode) — requireAuth loads *this* user's
+  // permissions/data for the request, not the session owner's, while
+  // GET /api/auth/me still reports both so the frontend can show the
+  // "Viewing as X" banner. The session's own tokenHash/userId never
+  // change — this is a pure overlay, not a session swap, so "return to
+  // your account" is just clearing this field back to null.
+  impersonatingUserId String?
+
+  user              User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impersonatingUser User? @relation("SessionImpersonationTarget", fields: [impersonatingUserId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+}
+
+// Audit trail for every "View as" — who, viewing as whom, when it
+// started, when it ended (still-open rows have endedAt: null). Never
+// deleted, even after the impersonation ends, so this stays a real
+// record of what happened, not just current state.
+model ImpersonationLog {
+  id             String    @id @default(cuid())
+  organizationId String
+  adminUserId    String
+  targetUserId   String
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  admin        User         @relation("ImpersonationLogAdmin", fields: [adminUserId], references: [id], onDelete: Cascade)
+  target       User         @relation("ImpersonationLogTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([adminUserId])
 }
 
 // ── FARMERS & FARMS ────────────────────────────────────────────

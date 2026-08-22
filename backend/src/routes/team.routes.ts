@@ -9,6 +9,7 @@ import {
   getInvitePreview,
   acceptInvite,
 } from "../controllers/team.controller";
+import { postStartImpersonation } from "../controllers/impersonation.controller";
 
 export const teamRouter = Router();
 
@@ -24,3 +25,9 @@ teamRouter.get("/", listTeam);
 teamRouter.post("/", requireRole("OWNER", "ADMIN"), inviteUser);
 teamRouter.get("/invites", requireRole("OWNER", "ADMIN"), listPendingInvites);
 teamRouter.delete("/invites/:id", requireRole("OWNER", "ADMIN"), revokeInvite);
+
+// requireRole here also happens to block nested impersonation: while
+// already viewing as someone, req.user.role is the target's (DISPATCHER)
+// role, not the real admin's — see impersonation.service.ts for the
+// explicit check this backs up.
+teamRouter.post("/:id/impersonate", requireRole("OWNER", "ADMIN"), postStartImpersonation);

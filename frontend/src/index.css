@@ -164,6 +164,32 @@ input {
   flex-direction: column;
 }
 
+.impersonation-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 20px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.impersonation-banner strong {
+  font-weight: 700;
+}
+
+.impersonation-banner-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.impersonation-banner .btn-ghost {
+  margin-left: auto;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .app-topbar {
   display: flex;
   align-items: center;

@@ -11,6 +11,8 @@ type AuthState = {
   signup: (organizationName: string, ownerName: string, email: string, password: string) => Promise<void>;
   acceptInvite: (token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  viewAs: (userId: string) => Promise<void>;
+  stopViewingAs: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -20,12 +22,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
 
+  async function refreshMe() {
+    const res = await apiFetch<{ user: User; organization: Organization }>("/api/auth/me");
+    setUser(res.user);
+    setOrganization(res.organization);
+  }
+
   useEffect(() => {
-    apiFetch<{ user: User; organization: Organization }>("/api/auth/me")
-      .then((res) => {
-        setUser(res.user);
-        setOrganization(res.organization);
-      })
+    refreshMe()
       .catch((err) => {
         // A 401 here just means "not logged in yet" — not an error to report.
         if (!(err instanceof ApiError && err.status === 401)) console.error(err);
@@ -66,8 +70,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOrganization(null);
   }
 
+  // "View as" — see notes.png's "org admin can log in into any employee
+  // account". Not a session swap: the backend overlays the target's
+  // permissions on the admin's existing session, so re-fetching /me is
+  // enough to pick up the effective user (and the impersonatedBy banner
+  // info) without a fresh login.
+  async function viewAs(userId: string) {
+    await apiFetch(`/api/team/${userId}/impersonate`, { method: "POST" });
+    await refreshMe();
+  }
+
+  async function stopViewingAs() {
+    await apiFetch("/api/auth/stop-impersonation", { method: "POST" });
+    await refreshMe();
+  }
+
   return (
-    <AuthContext.Provider value={{ user, organization, loading, login, signup, acceptInvite, logout }}>
+    <AuthContext.Provider
+      value={{ user, organization, loading, login, signup, acceptInvite, logout, viewAs, stopViewingAs }}
+    >
       {children}
     </AuthContext.Provider>
   );

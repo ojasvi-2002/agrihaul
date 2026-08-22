@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext";
+import { useNavigate } from "react-router-dom";
 import type { OrganizationPhoneNumber, TeamInvite, User, UserRole } from "../../types/api";
 import * as api from "./settingsApi";
 import { ApiError } from "../../lib/apiClient";
@@ -193,6 +194,8 @@ function PhoneNumbersSection({ canManage }: { canManage: boolean }) {
 const ROLES: UserRole[] = ["OWNER", "ADMIN", "DISPATCHER"];
 
 function TeamSection({ canManage }: { canManage: boolean }) {
+  const { viewAs } = useAuth();
+  const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [invites, setInvites] = useState<TeamInvite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -203,6 +206,7 @@ function TeamSection({ canManage }: { canManage: boolean }) {
   const [role, setRole] = useState<UserRole>("DISPATCHER");
   const [submitting, setSubmitting] = useState(false);
   const [justInvited, setJustInvited] = useState<string | null>(null);
+  const [viewAsBusyId, setViewAsBusyId] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -246,6 +250,19 @@ function TeamSection({ canManage }: { canManage: boolean }) {
       await refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to revoke invite");
+    }
+  }
+
+  async function handleViewAs(userId: string) {
+    setViewAsBusyId(userId);
+    setError(null);
+    try {
+      await viewAs(userId);
+      navigate("/dashboard");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to start viewing as this user");
+    } finally {
+      setViewAsBusyId(null);
     }
   }
 
@@ -308,6 +325,7 @@ function TeamSection({ canManage }: { canManage: boolean }) {
               <th>Name</th>
               <th>Email</th>
               <th>Role</th>
+              {canManage && <th></th>}
             </tr>
           </thead>
           <tbody>
@@ -316,6 +334,19 @@ function TeamSection({ canManage }: { canManage: boolean }) {
                 <td>{u.name}</td>
                 <td className="mono">{u.email}</td>
                 <td>{u.role}</td>
+                {canManage && (
+                  <td>
+                    {u.role === "DISPATCHER" && (
+                      <button
+                        className="btn-ghost btn-sm"
+                        disabled={viewAsBusyId === u.id}
+                        onClick={() => handleViewAs(u.id)}
+                      >
+                        View as
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

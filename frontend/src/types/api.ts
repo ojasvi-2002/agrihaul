@@ -13,6 +13,9 @@ export type User = {
   name: string;
   email: string;
   role: UserRole;
+  // Set only while an OWNER/ADMIN is "viewing as" this user — identifies
+  // who's really signed in, for the persistent banner.
+  impersonatedBy?: { id: string; name: string; email: string; role: UserRole } | null;
 };
 
 export type TeamInvite = {

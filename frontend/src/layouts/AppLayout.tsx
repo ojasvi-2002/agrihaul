@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
 import { ThemeToggleButton } from "../components/ThemeToggleButton";
+import { ImpersonationBanner } from "../components/ImpersonationBanner";
 
 const NAV_GROUPS: { label: string; links: { to: string; label: string }[] }[] = [
   {
@@ -34,6 +35,7 @@ export function AppLayout() {
 
   return (
     <div className="app-shell">
+      <ImpersonationBanner />
       <header className="app-topbar">
         <div className="app-logo">AgriHaul</div>
         <div className="app-org">{organization?.name}</div>

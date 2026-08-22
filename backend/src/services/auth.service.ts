@@ -8,6 +8,7 @@ import {
   deleteSessionByTokenHash,
   findValidSessionByTokenHash,
 } from "../repositories/session.repository";
+import { closeOpenImpersonationLog } from "../repositories/impersonationLog.repository";
 import { ServiceError } from "../utils/serviceErrors";
 import { uniqueSlugFor } from "../utils/slugify";
 
@@ -15,7 +16,9 @@ function generateRawToken() {
   return crypto.randomBytes(32).toString("hex");
 }
 
-function hashToken(rawToken: string) {
+// Exported so impersonation.service.ts can look up/update the caller's
+// own session row by its token hash without duplicating this logic.
+export function hashToken(rawToken: string) {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
 }
 
@@ -70,10 +73,27 @@ export async function signup(organizationName: string, ownerName: string, email:
 }
 
 export async function logout(rawToken: string) {
-  await deleteSessionByTokenHash(hashToken(rawToken));
+  const tokenHash = hashToken(rawToken);
+  // An open "View as" log must not be left dangling if the admin logs
+  // out entirely (rather than explicitly returning to their own account
+  // first) while still impersonating someone.
+  const session = await findValidSessionByTokenHash(tokenHash);
+  if (session?.impersonatingUserId) {
+    await closeOpenImpersonationLog(session.userId, session.impersonatingUserId);
+  }
+  await deleteSessionByTokenHash(tokenHash);
 }
 
-export async function getUserForToken(rawToken: string) {
+// The session's own owner/tokenHash never changes for View-as mode — it's
+// a pure overlay, not a session swap. When impersonatingUser is set, the
+// *effective* user for this request is the impersonated employee, while
+// `impersonatedBy` surfaces the real admin so requireAuth can expose both.
+export async function getSessionContext(rawToken: string) {
   const session = await findValidSessionByTokenHash(hashToken(rawToken));
-  return session?.user ?? null;
+  if (!session) return null;
+
+  if (session.impersonatingUser) {
+    return { user: session.impersonatingUser, impersonatedBy: session.user };
+  }
+  return { user: session.user, impersonatedBy: null };
 }
