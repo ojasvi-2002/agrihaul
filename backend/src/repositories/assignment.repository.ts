@@ -14,6 +14,14 @@ export function findActiveAssignmentForDriver(organizationId: string, driverId: 
   });
 }
 
+// Trucks currently out on a job — assigned but not yet completed. This
+// looks at Assignment.status (the dispatch itself), not PickupRequest
+// status, so it's a genuinely different signal from the pickup-status
+// dashboard counts: "how much is in flight right now."
+export function countPendingDispatches(organizationId: string) {
+  return prisma.assignment.count({ where: { organizationId, status: { in: ["ASSIGNED", "IN_PROGRESS"] } } });
+}
+
 export function createAssignment(
   organizationId: string,
   data: { pickupRequestId: string; driverId: string; vehicleId: string },

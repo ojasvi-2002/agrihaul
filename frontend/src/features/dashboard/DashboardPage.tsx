@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import type { DashboardStats } from "../../types/api";
 import * as api from "./dashboardApi";
 import { ApiError } from "../../lib/apiClient";
+import { StatCard } from "../../components/StatCard";
 
 const CARDS: { key: keyof DashboardStats; label: string; viewAllTo: string }[] = [
   { key: "pendingPickups", label: "Pending Pickups", viewAllTo: "/pickups" },
@@ -10,7 +10,7 @@ const CARDS: { key: keyof DashboardStats; label: string; viewAllTo: string }[] =
   { key: "pickupsToday", label: "Pickups Today", viewAllTo: "/pickups" },
   { key: "completedToday", label: "Completed Today", viewAllTo: "/pickups" },
   { key: "activeDrivers", label: "Active Drivers", viewAllTo: "/drivers" },
-  { key: "messagesNeedingReview", label: "Needs Review", viewAllTo: "/conversations" },
+  { key: "pendingDispatches", label: "Pending Dispatches", viewAllTo: "/pickups" },
 ];
 
 export function DashboardPage() {
@@ -36,15 +36,9 @@ export function DashboardPage() {
       {loading && <div className="empty-state">Loading…</div>}
 
       {!loading && stats && (
-        <div className="dashboard-grid">
+        <div className="stat-strip">
           {CARDS.map((card) => (
-            <div className="dashboard-card" key={card.key}>
-              <div className="dashboard-card-value">{stats[card.key]}</div>
-              <div className="dashboard-card-label">{card.label}</div>
-              <Link to={card.viewAllTo} className="dashboard-card-link">
-                view all →
-              </Link>
-            </div>
+            <StatCard key={card.key} value={stats[card.key]} label={card.label} viewAllTo={card.viewAllTo} />
           ))}
         </div>
       )}

@@ -54,7 +54,7 @@ export type DashboardStats = {
   pickupsToday: number;
   completedToday: number;
   activeDrivers: number;
-  messagesNeedingReview: number;
+  pendingDispatches: number;
 };
 
 export type OrganizationDetail = {

@@ -6,6 +6,7 @@ import type { OrganizationWithCounts, PlatformStats } from "../../types/api";
 import * as api from "./platformAdminApi";
 import { ApiError } from "../../lib/apiClient";
 import { ThemeToggleButton } from "../../components/ThemeToggleButton";
+import { StatCard } from "../../components/StatCard";
 
 export function PlatformAdminDashboardPage() {
   const navigate = useNavigate();
@@ -75,30 +76,12 @@ export function PlatformAdminDashboardPage() {
 
         {!loading && stats && (
           <div className="stat-strip">
-            <div className="stat-card">
-              <div className="stat-card-value">{stats.totalOrganizations}</div>
-              <div className="stat-card-label">Organizations</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-card-value">{stats.activeOrganizations}</div>
-              <div className="stat-card-label">Active</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-card-value">{stats.suspendedOrganizations}</div>
-              <div className="stat-card-label">Suspended</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-card-value">{stats.totalUsers}</div>
-              <div className="stat-card-label">Users</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-card-value">{stats.totalFarmers}</div>
-              <div className="stat-card-label">Farmers</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-card-value">{stats.totalPickups}</div>
-              <div className="stat-card-label">Pickups</div>
-            </div>
+            <StatCard value={stats.totalOrganizations} label="Organizations" />
+            <StatCard value={stats.activeOrganizations} label="Active" />
+            <StatCard value={stats.suspendedOrganizations} label="Suspended" />
+            <StatCard value={stats.totalUsers} label="Users" />
+            <StatCard value={stats.totalFarmers} label="Farmers" />
+            <StatCard value={stats.totalPickups} label="Pickups" />
           </div>
         )}
 

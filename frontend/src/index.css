@@ -947,47 +947,9 @@ input {
   margin: 24px 0 8px;
 }
 
-/* ── Dashboard page ───────────────────────────────────────── */
-
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 14px;
-}
-
-.dashboard-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 108px;
-}
-
-.dashboard-card-value {
-  font-size: 30px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.dashboard-card-label {
-  font-size: 13px;
-  color: var(--text-muted);
-  flex: 1;
-}
-
-.dashboard-card-link {
-  font-size: 12.5px;
-  color: var(--accent);
-  text-decoration: none;
-  align-self: flex-end;
-}
-
-.dashboard-card-link:hover {
-  text-decoration: underline;
-}
+/* Dashboard page and Platform Admin's own dashboard-style pages
+   (org list, org-detail Overview tab) all share one card language —
+   see .stat-strip/.stat-card below. */
 
 /* ── Platform admin ───────────────────────────────────────── */
 /* A distinct accent (blue, not the org app's lime) is deliberate — this
@@ -1038,8 +1000,8 @@ input {
 
 .stat-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
   margin-bottom: 24px;
 }
 
@@ -1047,22 +1009,40 @@ input {
   background: var(--surface);
   border: 1px solid var(--border);
   border-top: 2px solid var(--accent);
-  border-radius: 8px;
-  padding: 14px 16px;
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 100px;
 }
 
 .stat-card-value {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 30px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
 .stat-card-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 12.5px;
   color: var(--text-muted);
-  margin-top: 2px;
+  flex: 1;
+}
+
+.stat-card-link {
+  align-self: flex-end;
+  font-size: 12.5px;
+  color: var(--accent);
+  text-decoration: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.stat-card-link:hover {
+  text-decoration: underline;
 }
 
 .registry-table tr.clickable-row {

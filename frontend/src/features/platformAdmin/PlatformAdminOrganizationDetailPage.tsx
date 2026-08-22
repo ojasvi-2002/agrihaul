@@ -5,6 +5,7 @@ import type { OrganizationDetail, PickupRequest, PlatformDriver, PlatformFarmer 
 import * as api from "./platformAdminApi";
 import { ApiError } from "../../lib/apiClient";
 import { ThemeToggleButton } from "../../components/ThemeToggleButton";
+import { StatCard } from "../../components/StatCard";
 
 type TabKey = "overview" | "employees" | "drivers" | "farmers" | "dispatch" | "phones";
 
@@ -161,38 +162,18 @@ export function PlatformAdminOrganizationDetailPage() {
 
                 {activeTab === "overview" && (
                   <div className="stat-strip">
-                    <div className="stat-card">
-                      <div className="stat-card-value">{org._count.users}</div>
-                      <div className="stat-card-label">Employees</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-value">{org._count.farmers}</div>
-                      <div className="stat-card-label">Farmers</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-value">{org._count.farms}</div>
-                      <div className="stat-card-label">Farms</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-value">{org._count.drivers}</div>
-                      <div className="stat-card-label">Drivers</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-value">{org._count.vehicles}</div>
-                      <div className="stat-card-label">Vehicles</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-value">{org._count.conversations}</div>
-                      <div className="stat-card-label">Conversations</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-value">{org._count.messages}</div>
-                      <div className="stat-card-label">Messages</div>
-                    </div>
-                    <div className="stat-card">
-                      <div className="stat-card-value">{org._count.pickupRequests}</div>
-                      <div className="stat-card-label">Pickups</div>
-                    </div>
+                    <StatCard value={org._count.users} label="Employees" onViewAll={() => setActiveTab("employees")} />
+                    <StatCard value={org._count.farmers} label="Farmers" onViewAll={() => setActiveTab("farmers")} />
+                    <StatCard value={org._count.farms} label="Farms" />
+                    <StatCard value={org._count.drivers} label="Drivers" onViewAll={() => setActiveTab("drivers")} />
+                    <StatCard value={org._count.vehicles} label="Vehicles" />
+                    <StatCard value={org._count.conversations} label="Conversations" />
+                    <StatCard value={org._count.messages} label="Messages" />
+                    <StatCard
+                      value={org._count.pickupRequests}
+                      label="Pickups"
+                      onViewAll={() => setActiveTab("dispatch")}
+                    />
                   </div>
                 )}
 

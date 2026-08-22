@@ -41,9 +41,12 @@ describe("GET /api/dashboard/stats", () => {
     // real, non-zero, distinguishable value to assert on.
     await prisma.pickupRequest.create({ data: { organizationId, farmerId: farmer.id, status: "PENDING" } });
     await prisma.pickupRequest.create({ data: { organizationId, farmerId: farmer.id, status: "CONFIRMED" } });
+    const dispatchedPickup = await prisma.pickupRequest.create({
+      data: { organizationId, farmerId: farmer.id, status: "ASSIGNED" },
+    });
     await prisma.pickupRequest.create({ data: { organizationId, farmerId: farmer.id, status: "COMPLETED" } });
 
-    await prisma.driver.create({
+    const activeDriver = await prisma.driver.create({
       data: { organizationId, name: "Active Driver", phoneNumber: `+2${Date.now()}`.slice(0, 15), status: "ACTIVE" },
     });
     await prisma.driver.create({
@@ -54,18 +57,21 @@ describe("GET /api/dashboard/stats", () => {
         status: "INACTIVE",
       },
     });
-
-    const conversation = await prisma.conversation.create({ data: { organizationId, farmerId: farmer.id } });
-    await prisma.message.create({
+    const vehicle = await prisma.vehicle.create({
       data: {
         organizationId,
-        conversationId: conversation.id,
-        direction: "INBOUND",
-        status: "RECEIVED",
-        sender: farmer.phoneNumber,
-        recipient: "+15550000000",
-        body: "unclear message",
-        needsReview: true,
+        name: "Dashboard Truck",
+        registrationNumber: `REG-DASH-${Date.now()}`,
+        primaryDriverId: activeDriver.id,
+      },
+    });
+    await prisma.assignment.create({
+      data: {
+        organizationId,
+        pickupRequestId: dispatchedPickup.id,
+        driverId: activeDriver.id,
+        vehicleId: vehicle.id,
+        status: "ASSIGNED",
       },
     });
 
@@ -118,10 +124,10 @@ describe("GET /api/dashboard/stats", () => {
     expect(res.body.stats).toEqual({
       pendingPickups: 1,
       unassignedPickups: 1,
-      pickupsToday: 3,
+      pickupsToday: 4,
       completedToday: 1,
       activeDrivers: 1,
-      messagesNeedingReview: 1,
+      pendingDispatches: 1,
     });
   });
 
