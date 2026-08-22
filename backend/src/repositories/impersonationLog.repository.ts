@@ -14,3 +14,17 @@ export function closeOpenImpersonationLog(adminUserId: string, targetUserId: str
     data: { endedAt: new Date() },
   });
 }
+
+// Audit trail view for Settings — newest first, with the admin/target
+// names+emails needed to render it without extra lookups. Org-scoped like
+// every other list here, so one org can never see another's activity.
+export function listImpersonationLogsForOrg(organizationId: string) {
+  return prisma.impersonationLog.findMany({
+    where: { organizationId },
+    include: {
+      admin: { select: { id: true, name: true, email: true } },
+      target: { select: { id: true, name: true, email: true } },
+    },
+    orderBy: { startedAt: "desc" },
+  });
+}

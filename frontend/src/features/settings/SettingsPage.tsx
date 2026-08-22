@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { useNavigate } from "react-router-dom";
-import type { OrganizationPhoneNumber, TeamInvite, User, UserRole } from "../../types/api";
+import type { ImpersonationLogEntry, OrganizationPhoneNumber, TeamInvite, User, UserRole } from "../../types/api";
 import * as api from "./settingsApi";
 import { ApiError } from "../../lib/apiClient";
 
@@ -19,6 +19,7 @@ export function SettingsPage() {
       <OrganizationSection currentName={organization?.name ?? ""} canManage={canManage} />
       <PhoneNumbersSection canManage={canManage} />
       <TeamSection canManage={canManage} />
+      {canManage && <ImpersonationLogSection />}
     </div>
   );
 }
@@ -390,6 +391,70 @@ function TeamSection({ canManage }: { canManage: boolean }) {
             </tbody>
           </table>
         </>
+      )}
+    </section>
+  );
+}
+
+// Read-only audit trail for every "View as" session — who viewed as whom,
+// when it started, and whether it's still ongoing. Confirmed via
+// AskUserQuestion earlier: every impersonation event must be logged, and
+// this is where that log becomes visible rather than only living in the
+// database.
+function ImpersonationLogSection() {
+  const [logs, setLogs] = useState<ImpersonationLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .listImpersonationLogs()
+      .then(setLogs)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load impersonation log"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <section className="settings-section">
+      <div className="registry-header">
+        <h2>Impersonation log</h2>
+      </div>
+      <p className="settings-note">Every time an owner or admin views the app as an employee, it's recorded here.</p>
+
+      {error && <p className="page-error">{error}</p>}
+      {loading && <div className="empty-state">Loading…</div>}
+      {!loading && logs.length === 0 && <p className="settings-note">No impersonation activity yet.</p>}
+      {!loading && logs.length > 0 && (
+        <table className="registry-table">
+          <thead>
+            <tr>
+              <th>Admin</th>
+              <th>Viewed as</th>
+              <th>Started</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((l) => (
+              <tr key={l.id}>
+                <td>
+                  {l.admin.name} <span className="mono">{l.admin.email}</span>
+                </td>
+                <td>
+                  {l.target.name} <span className="mono">{l.target.email}</span>
+                </td>
+                <td>{new Date(l.startedAt).toLocaleString()}</td>
+                <td>
+                  {l.endedAt ? (
+                    <span className="status-badge status-inactive">Ended {new Date(l.endedAt).toLocaleString()}</span>
+                  ) : (
+                    <span className="status-badge status-active">Ongoing</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </section>
   );

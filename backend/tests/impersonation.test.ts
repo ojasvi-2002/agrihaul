@@ -17,6 +17,7 @@ describe("impersonation (\"view as\")", () => {
   let dispatcherCookie: string[];
   let otherOrgId: string;
   let otherOrgDispatcherId: string;
+  let otherOrgOwnerCookie: string[];
 
   beforeAll(async () => {
     const organization = await prisma.organization.create({
@@ -60,6 +61,20 @@ describe("impersonation (\"view as\")", () => {
       },
     });
     otherOrgDispatcherId = otherOrgDispatcher.id;
+
+    const otherOrgOwner = await prisma.user.create({
+      data: {
+        organizationId: otherOrgId,
+        name: "Other Org Owner",
+        email: `imp-other-owner-${Date.now()}@test.local`,
+        role: "OWNER",
+        passwordHash,
+      },
+    });
+    const otherOrgOwnerLogin = await request(app)
+      .post("/api/auth/login")
+      .send({ email: otherOrgOwner.email, password: "TestPassword123!" });
+    otherOrgOwnerCookie = otherOrgOwnerLogin.headers["set-cookie"];
   });
 
   afterAll(async () => {
@@ -172,5 +187,30 @@ describe("impersonation (\"view as\")", () => {
       .post("/api/auth/login")
       .send({ email: (await prisma.user.findFirst({ where: { organizationId, role: "OWNER" } }))!.email, password: "TestPassword123!" });
     ownerCookie = relogin.headers["set-cookie"];
+  });
+
+  it("lists the org's impersonation log, scoped to that org, for owner/admin only", async () => {
+    const start = await request(app).post(`/api/team/${dispatcherId}/impersonate`).set("Cookie", ownerCookie);
+    expect(start.status).toBe(204);
+    await request(app).post("/api/auth/stop-impersonation").set("Cookie", ownerCookie);
+
+    const listed = await request(app).get("/api/team/impersonation-logs").set("Cookie", ownerCookie);
+    expect(listed.status).toBe(200);
+    expect(listed.body.logs.length).toBeGreaterThan(0);
+    const entry = listed.body.logs[0];
+    expect(entry.target.id).toBeDefined();
+    expect(entry.admin.id).toBeDefined();
+    expect(entry.startedAt).toBeDefined();
+
+    // A dispatcher (non-admin) can't read the audit trail.
+    const asDispatcher = await request(app).get("/api/team/impersonation-logs").set("Cookie", dispatcherCookie);
+    expect(asDispatcher.status).toBe(403);
+
+    // A different organization never sees this org's entries.
+    const otherOrgListed = await request(app)
+      .get("/api/team/impersonation-logs")
+      .set("Cookie", otherOrgOwnerCookie);
+    expect(otherOrgListed.status).toBe(200);
+    expect(otherOrgListed.body.logs.map((l: { id: string }) => l.id)).not.toContain(entry.id);
   });
 });

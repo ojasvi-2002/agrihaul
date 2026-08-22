@@ -9,7 +9,7 @@ import {
   getInvitePreview,
   acceptInvite,
 } from "../controllers/team.controller";
-import { postStartImpersonation } from "../controllers/impersonation.controller";
+import { postStartImpersonation, getImpersonationLogs } from "../controllers/impersonation.controller";
 
 export const teamRouter = Router();
 
@@ -31,3 +31,4 @@ teamRouter.delete("/invites/:id", requireRole("OWNER", "ADMIN"), revokeInvite);
 // role, not the real admin's — see impersonation.service.ts for the
 // explicit check this backs up.
 teamRouter.post("/:id/impersonate", requireRole("OWNER", "ADMIN"), postStartImpersonation);
+teamRouter.get("/impersonation-logs", requireRole("OWNER", "ADMIN"), getImpersonationLogs);

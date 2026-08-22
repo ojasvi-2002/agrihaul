@@ -1,5 +1,5 @@
 import { apiFetch } from "../../lib/apiClient";
-import type { Organization, OrganizationPhoneNumber, TeamInvite, User, UserRole } from "../../types/api";
+import type { ImpersonationLogEntry, Organization, OrganizationPhoneNumber, TeamInvite, User, UserRole } from "../../types/api";
 
 export function updateOrganization(name: string) {
   return apiFetch<{ organization: Organization }>("/api/organizations/current", {
@@ -45,4 +45,8 @@ export function listPendingInvites() {
 
 export function revokeInvite(id: string) {
   return apiFetch<void>(`/api/team/invites/${id}`, { method: "DELETE" });
+}
+
+export function listImpersonationLogs() {
+  return apiFetch<{ logs: ImpersonationLogEntry[] }>("/api/team/impersonation-logs").then((r) => r.logs);
 }

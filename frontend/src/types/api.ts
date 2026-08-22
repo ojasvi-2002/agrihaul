@@ -18,6 +18,14 @@ export type User = {
   impersonatedBy?: { id: string; name: string; email: string; role: UserRole } | null;
 };
 
+export type ImpersonationLogEntry = {
+  id: string;
+  admin: { id: string; name: string; email: string };
+  target: { id: string; name: string; email: string };
+  startedAt: string;
+  endedAt: string | null;
+};
+
 export type TeamInvite = {
   id: string;
   name: string;
