@@ -20,6 +20,24 @@ export async function getOrganization(req: Request, res: Response) {
   res.json({ organization });
 }
 
+export async function getDrivers(req: Request, res: Response) {
+  const drivers = await platformAdminOrgService.getOrganizationDrivers(idParam(req));
+  if (drivers === null) return notFound(res, "Organization");
+  res.json({ drivers });
+}
+
+export async function getFarmers(req: Request, res: Response) {
+  const farmers = await platformAdminOrgService.getOrganizationFarmers(idParam(req));
+  if (farmers === null) return notFound(res, "Organization");
+  res.json({ farmers });
+}
+
+export async function getDispatchLog(req: Request, res: Response) {
+  const pickups = await platformAdminOrgService.getOrganizationDispatchLog(idParam(req));
+  if (pickups === null) return notFound(res, "Organization");
+  res.json({ pickups });
+}
+
 export async function createOrganization(req: Request, res: Response) {
   const parsed = createOrganizationSchema.safeParse(req.body);
   if (!parsed.success) return sendError(res, 400, parsed.error.issues[0]?.message || "Invalid organization data");

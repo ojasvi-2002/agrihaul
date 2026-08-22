@@ -939,3 +939,45 @@ input {
   color: var(--text-muted);
   margin: 0 0 24px;
 }
+
+.vertical-tabs {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.vertical-tab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  width: 160px;
+  border-right: 1px solid var(--border);
+  padding-right: 16px;
+}
+
+.vertical-tab {
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+.vertical-tab:hover {
+  background: var(--accent-bg);
+  color: var(--text);
+}
+
+.vertical-tab.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.vertical-tab-panel {
+  flex: 1;
+  min-width: 0;
+}

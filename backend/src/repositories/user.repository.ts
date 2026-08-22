@@ -1,3 +1,4 @@
+import type { UserRole } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 
 export function findUserByEmail(email: string) {
@@ -25,7 +26,7 @@ export function listUsersForOrg(organizationId: string) {
 
 export function createUser(
   organizationId: string,
-  data: { name: string; email: string; role: "OWNER" | "ADMIN" | "DISPATCHER" | "DRIVER"; passwordHash: string },
+  data: { name: string; email: string; role: UserRole; passwordHash: string },
 ) {
   return prisma.user.create({ data: { organizationId, ...data } });
 }

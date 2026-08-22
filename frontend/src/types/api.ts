@@ -1,4 +1,6 @@
-export type UserRole = "OWNER" | "ADMIN" | "DISPATCHER" | "DRIVER";
+// Drivers never get a platform login — the separate Driver type (below)
+// is the real driver concept, SMS-only, same as Farmer.
+export type UserRole = "OWNER" | "ADMIN" | "DISPATCHER";
 
 export type Organization = {
   id: string;
@@ -66,6 +68,13 @@ export type OrganizationDetail = {
   users: { id: string; name: string; email: string; role: UserRole; createdAt: string }[];
   phoneNumbers: { id: string; twilioPhoneNumber: string; friendlyName: string | null; active: boolean }[];
 };
+
+// Platform-admin org-detail tabs — Drivers and Farmers are read-only
+// views for the platform admin, not the org-scoped Driver/Farmer types
+// above (which power the org's own CRUD pages), but share the same core
+// shape plus one extra field each tab needs.
+export type PlatformDriver = Driver & { primaryVehicle: Vehicle | null };
+export type PlatformFarmer = Farmer & { _count: { farms: number } };
 
 export type Farmer = {
   id: string;
@@ -140,6 +149,8 @@ export type Assignment = {
   status: string;
   driver: Driver;
   vehicle: Vehicle;
+  assignedAt: string;
+  completedAt: string | null;
 };
 
 export type PickupRequest = {

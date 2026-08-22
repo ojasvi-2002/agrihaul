@@ -1,5 +1,12 @@
 import { apiFetch } from "../../lib/apiClient";
-import type { OrganizationDetail, OrganizationWithCounts, PlatformStats } from "../../types/api";
+import type {
+  OrganizationDetail,
+  OrganizationWithCounts,
+  PickupRequest,
+  PlatformDriver,
+  PlatformFarmer,
+  PlatformStats,
+} from "../../types/api";
 
 export function listOrganizations() {
   return apiFetch<{ organizations: OrganizationWithCounts[] }>("/api/platform-admin/organizations").then(
@@ -14,6 +21,24 @@ export function getStats() {
 export function getOrganization(id: string) {
   return apiFetch<{ organization: OrganizationDetail }>(`/api/platform-admin/organizations/${id}`).then(
     (r) => r.organization,
+  );
+}
+
+export function getOrganizationDrivers(id: string) {
+  return apiFetch<{ drivers: PlatformDriver[] }>(`/api/platform-admin/organizations/${id}/drivers`).then(
+    (r) => r.drivers,
+  );
+}
+
+export function getOrganizationFarmers(id: string) {
+  return apiFetch<{ farmers: PlatformFarmer[] }>(`/api/platform-admin/organizations/${id}/farmers`).then(
+    (r) => r.farmers,
+  );
+}
+
+export function getOrganizationDispatchLog(id: string) {
+  return apiFetch<{ pickups: PickupRequest[] }>(`/api/platform-admin/organizations/${id}/pickups`).then(
+    (r) => r.pickups,
   );
 }
 

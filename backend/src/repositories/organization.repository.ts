@@ -79,6 +79,14 @@ export function findOrganizationByIdForPlatform(id: string) {
   return prisma.organization.findUnique({ where: { id }, include: WITH_PLATFORM_DETAIL });
 }
 
+// A cheap existence check for the tab endpoints (drivers/farmers/dispatch
+// log) — those don't need the full WITH_PLATFORM_DETAIL query, just a
+// clear 404 instead of silently returning an empty list for an org id
+// that doesn't exist.
+export function organizationExists(id: string) {
+  return prisma.organization.findUnique({ where: { id }, select: { id: true } });
+}
+
 // Most recent inbound-or-outbound message in the org — the simplest
 // honest signal of "is anyone actually using this," without inventing a
 // more elaborate activity model than CLAUDE.md's message-centric

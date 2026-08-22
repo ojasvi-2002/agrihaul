@@ -119,6 +119,91 @@ describe("platform admin", () => {
     expect(res.body.organization).not.toHaveProperty("subscription");
   });
 
+  it("shows drivers, farmers, and a dispatch log per organization, never leaking another org's data", async () => {
+    const otherOrg = await prisma.organization.create({
+      data: { name: "Platform Admin Other Org", slug: `platform-admin-other-${Date.now()}` },
+    });
+
+    const driver = await prisma.driver.create({
+      data: { organizationId: testOrgId, name: "Test Driver", phoneNumber: `+1555${Date.now()}`.slice(0, 15) },
+    });
+    const vehicle = await prisma.vehicle.create({
+      data: {
+        organizationId: testOrgId,
+        name: "Test Truck",
+        registrationNumber: `REG-${Date.now()}`,
+        primaryDriverId: driver.id,
+      },
+    });
+    const farmer = await prisma.farmer.create({
+      data: { organizationId: testOrgId, name: "Test Farmer", phoneNumber: `+1666${Date.now()}`.slice(0, 15) },
+    });
+    const pickup = await prisma.pickupRequest.create({
+      data: { organizationId: testOrgId, farmerId: farmer.id, product: "Maize", quantity: 50, unit: "KG" },
+    });
+    await prisma.assignment.create({
+      data: {
+        organizationId: testOrgId,
+        pickupRequestId: pickup.id,
+        driverId: driver.id,
+        vehicleId: vehicle.id,
+        status: "COMPLETED",
+        completedAt: new Date(),
+      },
+    });
+
+    // Same shapes, but in a completely different org — must never appear
+    // when querying testOrgId's tabs.
+    const otherDriver = await prisma.driver.create({
+      data: { organizationId: otherOrg.id, name: "Other Org Driver", phoneNumber: `+1777${Date.now()}`.slice(0, 15) },
+    });
+    const otherFarmer = await prisma.farmer.create({
+      data: { organizationId: otherOrg.id, name: "Other Org Farmer", phoneNumber: `+1888${Date.now()}`.slice(0, 15) },
+    });
+    await prisma.pickupRequest.create({
+      data: { organizationId: otherOrg.id, farmerId: otherFarmer.id, product: "Rice", quantity: 10, unit: "KG" },
+    });
+
+    const driversRes = await request(app)
+      .get(`/api/platform-admin/organizations/${testOrgId}/drivers`)
+      .set("Cookie", adminCookie);
+    expect(driversRes.status).toBe(200);
+    expect(driversRes.body.drivers).toHaveLength(1);
+    expect(driversRes.body.drivers[0].name).toBe("Test Driver");
+    expect(driversRes.body.drivers[0].primaryVehicle.registrationNumber).toBe(vehicle.registrationNumber);
+    expect(driversRes.body.drivers.map((d: { name: string }) => d.name)).not.toContain(otherDriver.name);
+
+    const farmersRes = await request(app)
+      .get(`/api/platform-admin/organizations/${testOrgId}/farmers`)
+      .set("Cookie", adminCookie);
+    expect(farmersRes.status).toBe(200);
+    expect(farmersRes.body.farmers).toHaveLength(1);
+    expect(farmersRes.body.farmers[0].name).toBe("Test Farmer");
+    expect(farmersRes.body.farmers[0]._count.farms).toBe(0);
+    expect(farmersRes.body.farmers.map((f: { name: string }) => f.name)).not.toContain(otherFarmer.name);
+
+    const dispatchRes = await request(app)
+      .get(`/api/platform-admin/organizations/${testOrgId}/pickups`)
+      .set("Cookie", adminCookie);
+    expect(dispatchRes.status).toBe(200);
+    expect(dispatchRes.body.pickups).toHaveLength(1);
+    expect(dispatchRes.body.pickups[0].product).toBe("Maize");
+    // Full assignment history (including a COMPLETED one), not just active.
+    expect(dispatchRes.body.pickups[0].assignments).toHaveLength(1);
+    expect(dispatchRes.body.pickups[0].assignments[0].status).toBe("COMPLETED");
+    expect(dispatchRes.body.pickups[0].assignments[0].driver.name).toBe("Test Driver");
+    expect(dispatchRes.body.pickups.map((p: { product: string }) => p.product)).not.toContain("Rice");
+
+    // A bogus/unknown org id gets a clean 404 on every tab, not an empty
+    // list that would look identical to "this org just has no drivers."
+    const missing404 = await request(app)
+      .get("/api/platform-admin/organizations/nonexistent-id/drivers")
+      .set("Cookie", adminCookie);
+    expect(missing404.status).toBe(404);
+
+    await prisma.organization.delete({ where: { id: otherOrg.id } });
+  });
+
   it("creates a new organization with an owner who can immediately log in", async () => {
     const email = `platform-admin-created-${Date.now()}@test.local`;
     const res = await request(app)

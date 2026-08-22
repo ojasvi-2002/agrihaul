@@ -6,6 +6,9 @@ import {
   listOrganizations,
   getStats,
   getOrganization,
+  getDrivers,
+  getFarmers,
+  getDispatchLog,
   createOrganization,
   suspendOrganization,
   activateOrganization,
@@ -27,6 +30,9 @@ platformAdminRouter.get("/organizations", listOrganizations);
 // "stats" as the :id param and this route would never be reached.
 platformAdminRouter.get("/organizations/stats", getStats);
 platformAdminRouter.get("/organizations/:id", getOrganization);
+platformAdminRouter.get("/organizations/:id/drivers", getDrivers);
+platformAdminRouter.get("/organizations/:id/farmers", getFarmers);
+platformAdminRouter.get("/organizations/:id/pickups", getDispatchLog);
 platformAdminRouter.post("/organizations", createOrganization);
 platformAdminRouter.post("/organizations/:id/suspend", suspendOrganization);
 platformAdminRouter.post("/organizations/:id/activate", activateOrganization);

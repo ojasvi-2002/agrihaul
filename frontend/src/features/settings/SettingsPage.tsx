@@ -190,7 +190,7 @@ function PhoneNumbersSection({ canManage }: { canManage: boolean }) {
   );
 }
 
-const ROLES: UserRole[] = ["OWNER", "ADMIN", "DISPATCHER", "DRIVER"];
+const ROLES: UserRole[] = ["OWNER", "ADMIN", "DISPATCHER"];
 
 function TeamSection({ canManage }: { canManage: boolean }) {
   const [users, setUsers] = useState<User[]>([]);

@@ -27,11 +27,14 @@ enum OrganizationStatus {
   SUSPENDED
 }
 
+// DRIVER was removed (see migration 20260822_remove_driver_user_role) —
+// drivers never get a platform login at all, the same as farmers. The
+// separate Driver model (name/phoneNumber/status, no email, no password)
+// is the real driver concept: SMS-only, exactly like Farmer.
 enum UserRole {
   OWNER
   ADMIN
   DISPATCHER
-  DRIVER
 }
 
 enum CommunicationChannel {
