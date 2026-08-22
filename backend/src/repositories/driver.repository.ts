@@ -15,6 +15,10 @@ export function listDriversForPlatform(organizationId: string) {
   });
 }
 
+export function countActiveDrivers(organizationId: string) {
+  return prisma.driver.count({ where: { organizationId, status: "ACTIVE" } });
+}
+
 export function findDriverById(organizationId: string, id: string) {
   return prisma.driver.findFirst({ where: { id, organizationId } });
 }

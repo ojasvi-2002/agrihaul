@@ -52,6 +52,10 @@ export function setNeedsReview(id: string, needsReview: boolean) {
   return prisma.message.update({ where: { id }, data: { needsReview } });
 }
 
+export function countNeedsReview(organizationId: string) {
+  return prisma.message.count({ where: { organizationId, needsReview: true } });
+}
+
 // Twilio isn't wired up until Phase 6, so this only records the outbound
 // message as QUEUED — nothing is actually sent yet.
 export function createOutboundMessage(

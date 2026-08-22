@@ -5,6 +5,7 @@ import { usePlatformAdminAuth } from "./PlatformAdminAuthContext";
 import type { OrganizationWithCounts, PlatformStats } from "../../types/api";
 import * as api from "./platformAdminApi";
 import { ApiError } from "../../lib/apiClient";
+import { ThemeToggleButton } from "../../components/ThemeToggleButton";
 
 export function PlatformAdminDashboardPage() {
   const navigate = useNavigate();
@@ -54,6 +55,7 @@ export function PlatformAdminDashboardPage() {
         <div className="app-logo">AgriHaul Platform Admin</div>
         <div className="app-topbar-right">
           <span className="app-user">{admin?.name}</span>
+          <ThemeToggleButton />
           <button className="btn-ghost" onClick={() => logout()}>
             Sign out
           </button>

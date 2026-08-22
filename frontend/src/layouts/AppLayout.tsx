@@ -1,5 +1,6 @@
 import { NavLink, Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
+import { ThemeToggleButton } from "../components/ThemeToggleButton";
 
 const NAV_GROUPS: { label: string; links: { to: string; label: string }[] }[] = [
   {
@@ -38,6 +39,7 @@ export function AppLayout() {
         <div className="app-org">{organization?.name}</div>
         <div className="app-topbar-right">
           <span className="app-user">{user.name}</span>
+          <ThemeToggleButton />
           <button className="btn-ghost" onClick={() => logout()}>
             Sign out
           </button>
@@ -45,6 +47,9 @@ export function AppLayout() {
       </header>
       <div className="app-body">
         <nav className="app-sidebar">
+          <NavLink to="/dashboard" className={({ isActive }) => `app-nav-top-link ${isActive ? "active" : ""}`}>
+            Dashboard
+          </NavLink>
           {NAV_GROUPS.map((group) => (
             <div className="app-nav-group" key={group.label}>
               <div className="app-nav-group-label">{group.label}</div>

@@ -48,6 +48,15 @@ export type PlatformStats = {
   totalPickups: number;
 };
 
+export type DashboardStats = {
+  pendingPickups: number;
+  unassignedPickups: number;
+  pickupsToday: number;
+  completedToday: number;
+  activeDrivers: number;
+  messagesNeedingReview: number;
+};
+
 export type OrganizationDetail = {
   id: string;
   name: string;

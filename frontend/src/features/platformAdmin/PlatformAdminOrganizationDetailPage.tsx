@@ -4,6 +4,7 @@ import { usePlatformAdminAuth } from "./PlatformAdminAuthContext";
 import type { OrganizationDetail, PickupRequest, PlatformDriver, PlatformFarmer } from "../../types/api";
 import * as api from "./platformAdminApi";
 import { ApiError } from "../../lib/apiClient";
+import { ThemeToggleButton } from "../../components/ThemeToggleButton";
 
 type TabKey = "overview" | "employees" | "drivers" | "farmers" | "dispatch" | "phones";
 
@@ -109,6 +110,7 @@ export function PlatformAdminOrganizationDetailPage() {
         <div className="app-logo">AgriHaul Platform Admin</div>
         <div className="app-topbar-right">
           <span className="app-user">{admin?.name}</span>
+          <ThemeToggleButton />
           <button className="btn-ghost" onClick={() => logout()}>
             Sign out
           </button>

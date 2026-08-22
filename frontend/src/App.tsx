@@ -4,6 +4,7 @@ import { LoginPage } from "./features/auth/LoginPage";
 import { SignupPage } from "./features/auth/SignupPage";
 import { AcceptInvitePage } from "./features/auth/AcceptInvitePage";
 import { AppLayout } from "./layouts/AppLayout";
+import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { ConversationsPage } from "./features/conversations/ConversationsPage";
 import { PickupsPage } from "./features/pickups/PickupsPage";
 import { FarmersPage } from "./features/farmers/FarmersPage";
@@ -45,6 +46,7 @@ function App() {
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/accept-invite" element={<AcceptInvitePage />} />
           <Route element={<AppLayout />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/conversations" element={<ConversationsPage />} />
             <Route path="/pickups" element={<PickupsPage />} />
             <Route path="/farmers" element={<FarmersPage />} />

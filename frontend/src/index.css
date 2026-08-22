@@ -1,4 +1,24 @@
 :root {
+  /* Light (default) — explicit data-theme="dark" below overrides these. */
+  --bg: #f7f8f4;
+  --surface: #ffffff;
+  --surface-2: #eef0e9;
+  --border: #e2e5db;
+  --text: #1c2016;
+  --text-muted: #6b7260;
+  --accent: #4a7a1e;
+  --accent-hover: #3d6519;
+  --accent-contrast: #ffffff;
+  --accent-bg: #eaf2df;
+  --inbound-bg: #eef0e9;
+  --outbound-bg: #eaf2df;
+  --danger: #b3261e;
+  --danger-bg: #fbe4e2;
+  --font: -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+:root[data-theme="dark"] {
   --bg: #0c0f09;
   --surface: #12160d;
   --surface-2: #171c10;
@@ -13,8 +33,6 @@
   --outbound-bg: #1e2412;
   --danger: #e5615a;
   --danger-bg: #2a1613;
-  --font: -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Consolas, monospace;
 }
 
 * {
@@ -206,6 +224,24 @@ input {
   background: var(--surface-2);
 }
 
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
 /* Vertical sidebar nav, grouped into labeled sections — wraps the topbar
    below in a flex row so the sidebar and main content sit side by side. */
 .app-body {
@@ -261,6 +297,11 @@ input {
   color: var(--accent);
   font-weight: 600;
   border-left: 2px solid var(--accent);
+}
+
+.app-nav-top-link {
+  font-weight: 600;
+  margin-bottom: -6px;
 }
 
 .app-main {
@@ -496,12 +537,19 @@ input {
   white-space: nowrap;
 }
 
-.status-pending { background: #2e2712; color: #e0c257; }
-.status-confirmed { background: #142330; color: #6fb3e8; }
-.status-assigned { background: #1e2412; color: #c6e24a; }
-.status-in_progress { background: #1e2412; color: #c6e24a; }
-.status-completed { background: #23271c; color: #a3ab92; }
-.status-cancelled { background: #2a1613; color: #e5615a; }
+.status-pending { background: #f5efe0; color: #8a6d1d; }
+.status-confirmed { background: #e3edf7; color: #2a5c8a; }
+.status-assigned { background: #eaf2df; color: #4a7a1e; }
+.status-in_progress { background: #eaf2df; color: #4a7a1e; }
+.status-completed { background: #e6e6e6; color: #555; }
+.status-cancelled { background: #fbe4e2; color: #a13a30; }
+
+:root[data-theme="dark"] .status-pending { background: #2e2712; color: #e0c257; }
+:root[data-theme="dark"] .status-confirmed { background: #142330; color: #6fb3e8; }
+:root[data-theme="dark"] .status-assigned { background: #1e2412; color: #c6e24a; }
+:root[data-theme="dark"] .status-in_progress { background: #1e2412; color: #c6e24a; }
+:root[data-theme="dark"] .status-completed { background: #23271c; color: #a3ab92; }
+:root[data-theme="dark"] .status-cancelled { background: #2a1613; color: #e5615a; }
 
 .pickup-detail {
   padding: 24px 28px;
@@ -808,11 +856,17 @@ input {
   font-size: 13px;
 }
 
-.status-active { background: #1e2412; color: #c6e24a; }
-.status-inactive { background: #23271c; color: #a3ab92; }
-.status-available { background: #1e2412; color: #c6e24a; }
-.status-en_route { background: #2e2712; color: #e0c257; }
-.status-maintenance { background: #2a1613; color: #e5615a; }
+.status-active { background: #eaf2df; color: #4a7a1e; }
+.status-inactive { background: #e6e6e6; color: #555; }
+.status-available { background: #eaf2df; color: #4a7a1e; }
+.status-en_route { background: #f5efe0; color: #8a6d1d; }
+.status-maintenance { background: #fbe4e2; color: #a13a30; }
+
+:root[data-theme="dark"] .status-active { background: #1e2412; color: #c6e24a; }
+:root[data-theme="dark"] .status-inactive { background: #23271c; color: #a3ab92; }
+:root[data-theme="dark"] .status-available { background: #1e2412; color: #c6e24a; }
+:root[data-theme="dark"] .status-en_route { background: #2e2712; color: #e0c257; }
+:root[data-theme="dark"] .status-maintenance { background: #2a1613; color: #e5615a; }
 
 /* ── Map page ─────────────────────────────────────────────── */
 
@@ -893,6 +947,48 @@ input {
   margin: 24px 0 8px;
 }
 
+/* ── Dashboard page ───────────────────────────────────────── */
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.dashboard-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 108px;
+}
+
+.dashboard-card-value {
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-card-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.dashboard-card-link {
+  font-size: 12.5px;
+  color: var(--accent);
+  text-decoration: none;
+  align-self: flex-end;
+}
+
+.dashboard-card-link:hover {
+  text-decoration: underline;
+}
+
 /* ── Platform admin ───────────────────────────────────────── */
 /* A distinct accent (blue, not the org app's lime) is deliberate — this
    is a separate, higher-privilege area and should never look like a
@@ -902,6 +998,14 @@ input {
 
 .platform-admin-page,
 .platform-admin-login {
+  --accent: #2f7fd6;
+  --accent-hover: #2568b3;
+  --accent-bg: #e8f0fc;
+  --accent-contrast: #ffffff;
+}
+
+:root[data-theme="dark"] .platform-admin-page,
+:root[data-theme="dark"] .platform-admin-login {
   --accent: #5b9df0;
   --accent-hover: #7ab0f5;
   --accent-bg: #13233a;

@@ -22,6 +22,33 @@ export function findPickupRequestById(organizationId: string, id: string) {
   return prisma.pickupRequest.findFirst({ where: { id, organizationId }, include: WITH_DISPLAY_DETAILS });
 }
 
+// ── Dashboard counts ─────────────────────────────────────────────
+
+// Not yet confirmed by a dispatcher — needs attention first.
+export function countPendingPickups(organizationId: string) {
+  return prisma.pickupRequest.count({ where: { organizationId, status: "PENDING" } });
+}
+
+// Confirmed, but no truck assigned yet — distinct from "pending": these
+// are already validated, just waiting on dispatch.
+export function countUnassignedPickups(organizationId: string) {
+  return prisma.pickupRequest.count({ where: { organizationId, status: "CONFIRMED" } });
+}
+
+export function countPickupsCreatedSince(organizationId: string, since: Date) {
+  return prisma.pickupRequest.count({ where: { organizationId, createdAt: { gte: since } } });
+}
+
+// updatedAt is the closest real signal to "completed today" without a
+// dedicated completedAt column on PickupRequest itself (Assignment has
+// one, but a pickup can be completed without ever having had an
+// assignment recorded, e.g. a manual status edit).
+export function countCompletedSince(organizationId: string, since: Date) {
+  return prisma.pickupRequest.count({
+    where: { organizationId, status: "COMPLETED", updatedAt: { gte: since } },
+  });
+}
+
 // Platform-admin dispatch log: unlike WITH_DISPLAY_DETAILS (which only
 // shows a pickup's currently-active assignment, for the org-scoped
 // dispatch UI), a log needs the *full* assignment history — including
