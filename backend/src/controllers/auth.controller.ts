@@ -8,8 +8,15 @@ import { sendError } from "../utils/httpErrors";
 const COOKIE_OPTIONS = {
   httpOnly: true,
   signed: true,
-  sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
+  // Frontend and backend deploy to different subdomains (e.g. separate
+  // *.onrender.com services) — browsers treat that as a different *site*,
+  // not just a different origin, so SameSite=Lax would silently stop the
+  // cookie being sent on the frontend's fetch() calls. None+Secure is
+  // required for that cross-site case; Lax stays correct (and simpler)
+  // for local dev, where frontend/backend share the "localhost" site
+  // across different ports.
+  sameSite: env.isProduction ? ("none" as const) : ("lax" as const),
+  secure: env.isProduction,
 };
 
 // Exported so any other flow that logs a user in immediately after

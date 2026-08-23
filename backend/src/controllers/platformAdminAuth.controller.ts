@@ -7,8 +7,10 @@ import { sendError } from "../utils/httpErrors";
 const COOKIE_OPTIONS = {
   httpOnly: true,
   signed: true,
-  sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
+  // See the identical comment in auth.controller.ts — same cross-site
+  // reasoning applies to the platform-admin cookie.
+  sameSite: env.isProduction ? ("none" as const) : ("lax" as const),
+  secure: env.isProduction,
 };
 
 export async function postLogin(req: Request, res: Response) {
