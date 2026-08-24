@@ -618,25 +618,25 @@ Everything below is a real gap, not a hypothetical — none of it has been done 
 
 ### Demo deployment: Render, $0, one blueprint
 
-For demoing to a prospective customer — not a real launch — `render.yaml` at the repo root deploys the database, backend, and frontend together, all on Render's free plan, no credit card required. This intentionally skips most of the checklist above (it's fine for a demo, not for real customer data).
+For demoing to a prospective customer — not a real launch — `render.yaml` at the repo root deploys the database and **one combined web service** (backend API + the built frontend, served from the same address) on Render's free plan, no credit card required. This intentionally skips most of the checklist above (it's fine for a demo, not for real customer data).
+
+**Frontend and backend are deliberately one service, not two.** An earlier version of this setup used a separate static site for the frontend — that broke login in Safari, which blocks cookies shared across two different `*.onrender.com` addresses as cross-site tracking, even with `SameSite=None` set correctly. Serving both from the same origin (`backend/src/app.ts` serves `frontend/dist` directly once it's built) sidesteps the problem at the root instead of working around it.
 
 **One-time setup:**
 
 1. **Twilio.** Sign up for a free trial account at twilio.com — no card needed for the trial. From the console dashboard, copy your **Account SID** and **Auth Token**. Under *Phone Numbers → Manage → Buy a Number*, claim a free trial number (E.164 format, e.g. `+15551234567`). Under *Phone Numbers → Manage → Verified Caller IDs*, add whatever phone you'll use to play "the farmer" during the demo — trial accounts can only text verified numbers.
 2. **Push this repo to GitHub** if it isn't already (it is).
-3. **Render.** Sign up at render.com (no card required) → **New → Blueprint** → connect this GitHub repo. Render reads `render.yaml` automatically and shows all three services (`agrihaul-db`, `agrihaul-backend`, `agrihaul-frontend`). When it asks for `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` (the three secrets `render.yaml` deliberately doesn't hardcode), paste in the values from step 1. Click **Apply**.
-4. **Wait for the first deploy** — the backend build runs migrations automatically (`prisma migrate deploy`, baked into `render.yaml`'s build command), so the database ends up with the right tables with no manual step.
-5. **Fix the URLs.** `render.yaml` guesses the two service URLs will be `agrihaul-backend.onrender.com` and `agrihaul-frontend.onrender.com` — Render only honors that if the names are still available. Check the **actual** URLs shown at the top of each service's dashboard page. If either differs from the guess:
-   - Backend service → **Environment** → update `CORS_ORIGIN` (the real frontend URL) and `PUBLIC_BASE_URL` (the real backend URL) → save (triggers a redeploy).
-   - Frontend service → **Environment** → update `VITE_API_URL` (the real backend URL) → save. This *must* trigger a rebuild, not just a restart — `VITE_API_URL` gets baked into the static files at build time, so a stale value silently persists otherwise. Render's env var save does trigger a rebuild for static sites; confirm one actually ran in the **Events** tab.
-6. **Point Twilio at the real backend.** Twilio console → your number → *Messaging Configuration* → set "A message comes in" to `https://<your-backend-url>/webhooks/twilio/incoming` (POST) and the status callback to `https://<your-backend-url>/webhooks/twilio/status`.
-7. **Create your demo org.** Open the frontend URL and use the normal signup page to create an organization + owner account — no seed script needed against the remote database.
+3. **Render.** Sign up at render.com (no card required) → **New → Blueprint** → connect this GitHub repo. Render reads `render.yaml` automatically and shows the database and the `agrihaul-backend` service. When it asks for `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` (the three secrets `render.yaml` deliberately doesn't hardcode), paste in the values from step 1. Click **Apply**.
+4. **Wait for the first deploy** — the build compiles the frontend, then the backend, then runs migrations automatically (`prisma migrate deploy`, baked into `render.yaml`'s build command), so the database ends up with the right tables with no manual step.
+5. **Check the real URL.** `render.yaml` guesses the service URL will be `agrihaul-backend.onrender.com` — Render only honors that if the name is still available. Check the actual URL shown at the top of the service's dashboard page. If it differs from the guess, go to **Environment** and update `CORS_ORIGIN` and `PUBLIC_BASE_URL` to match (both should be the same real URL) → save (triggers a redeploy). `VITE_API_URL` is deliberately left empty and needs no fixing — the frontend calls its API with a relative path, which resolves correctly against whatever address actually served the page.
+6. **Point Twilio at the real backend.** Twilio console → your number → *Messaging Configuration* → set "A message comes in" to `https://<your-real-url>/webhooks/twilio/incoming` (POST) and the status callback to `https://<your-real-url>/webhooks/twilio/status`.
+7. **Create your demo org.** Open the service's URL and use the normal signup page to create an organization + owner account — no seed script needed against the remote database.
 8. **Add the phone number.** Log in → Settings → Phone Numbers → add the Twilio number from step 1.
 9. **Test it for real** — text the Twilio number from the verified demo phone, confirm it shows up in Conversations, reply from the app, confirm the reply SMS arrives.
 
-**Before each demo session after that:** nothing — the URL and webhook are already configured, so it just works. Only re-do the URL-fixup step (5) if you ever redeploy under different service names.
+**Before each demo session after that:** nothing — the URL and webhook are already configured, so it just works. Only re-check step 5 if you ever redeploy under a different service name.
 
-**Known limits of this setup:** Twilio's trial credit (~$15) covers plenty of demo messages but isn't unlimited — check the console balance if you're demoing a lot. Render's free Postgres expires after a while (Render's own docs disagree on whether it's 30 or 90 days) and needs recreating via the Render dashboard — fine for an active demo period, not something to leave unattended for months.
+**Known limits of this setup:** Twilio's trial credit (~$15) covers plenty of demo messages but isn't unlimited — check the console balance if you're demoing a lot. Render's free Postgres expires after a while (Render's own docs disagree on whether it's 30 or 90 days) and needs recreating via the Render dashboard — fine for an active demo period, not something to leave unattended for months. And the free web service spins down after inactivity, so the first request after a quiet period can take up to ~50 seconds to wake back up — worth sending yourself a quick test message a minute before an actual demo starts.
 
 ---
 

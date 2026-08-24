@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import path from "path";
+import fs from "fs";
 import { env } from "./config/env";
 import { ServiceError } from "./utils/serviceErrors";
 import { healthRouter } from "./routes/health.routes";
@@ -52,6 +54,32 @@ app.use("/api/team", teamRouter);
 app.use("/api/platform-admin", platformAdminRouter);
 app.use("/api/realtime", realtimeRouter);
 app.use("/api/dashboard", dashboardRouter);
+
+// Serves the built frontend from this same process/origin when present —
+// only true on Render's combined single-service deploy (see render.yaml),
+// where the frontend is built into frontend/dist alongside this backend.
+// Local dev keeps running the frontend separately via Vite (README §10),
+// so frontend/dist won't exist there and this whole block is a no-op.
+//
+// Serving both from one origin, rather than two separate Render services,
+// is a deliberate fix, not a convenience: Safari (and increasingly other
+// browsers) blocks cookies set across two different *.onrender.com
+// addresses as cross-site tracking, even with SameSite=None — silently
+// breaking login. Same-origin sidesteps that entirely.
+const frontendDist = path.join(__dirname, "../../frontend/dist");
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    // Only fall back to the SPA shell for page loads that aren't a
+    // known API/webhook path (already handled above if they matched) or
+    // a real static asset (already served above if it existed) — a
+    // genuinely bad /api/... path should still 404 as JSON, not HTML.
+    if (req.method !== "GET" || req.path.startsWith("/api/") || req.path.startsWith("/webhooks/")) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDist, "index.html"));
+  });
+}
 
 app.use((req: Request, res: Response) => {
   res.status(404).json({ error: { message: "Not found" } });

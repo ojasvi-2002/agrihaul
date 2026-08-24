@@ -1,11 +1,18 @@
-# Render Blueprint — deploys the whole app (database + backend + frontend)
-# from one file, under one Render account. See README.md §13 for the
-# step-by-step walkthrough (Twilio setup, first-deploy URL fixups, etc.).
+# Render Blueprint — deploys the database + one combined web service
+# (backend API + built frontend, served from the same origin) under one
+# Render account. See README.md §13 for the step-by-step walkthrough.
 #
-# All three services use Render's free plan — $0, no card required to
-# create them. The free Postgres database expires after a while on the
-# free plan (Render's docs are inconsistent on the exact window, 30-90
-# days) and needs recreating; fine for demoing, not for a real customer.
+# Frontend and backend are deliberately ONE service, not two: Safari (and
+# increasingly other browsers) blocks the login cookie when frontend and
+# backend live on two different *.onrender.com addresses, treating it as
+# cross-site tracking even with SameSite=None+Secure set correctly. Same
+# origin sidesteps the problem entirely — see the matching comment in
+# backend/src/app.ts.
+#
+# Both pieces use Render's free plan — $0, no card required to create
+# them. The free Postgres database expires after a while on the free plan
+# (Render's docs are inconsistent on the exact window, 30-90 days) and
+# needs recreating; fine for demoing, not for a real customer.
 
 databases:
   - name: agrihaul-db
@@ -19,18 +26,23 @@ services:
     runtime: node
     plan: free
     # Installs root deps (Prisma/pg — see backend/src/lib/prisma.ts for
-    # why those live at the repo root, not in backend/package.json),
-    # then backend's own deps, generates the Prisma client, applies any
-    # pending migrations, then compiles TypeScript.
+    # why those live at the repo root, not in backend/package.json), then
+    # backend's and frontend's own deps, builds the frontend static files,
+    # generates the Prisma client, applies any pending migrations, then
+    # compiles the backend. backend/src/app.ts serves frontend/dist
+    # directly once it exists, so nothing further is needed to wire them
+    # together.
     #
-    # --include=dev is required here even though NODE_ENV=production is
-    # set below: npm normally skips devDependencies (typescript, @types/*)
-    # whenever NODE_ENV=production is set, which breaks the `tsc` build
-    # step itself. NODE_ENV=production still applies at runtime as normal
-    # (this only affects what `npm install` fetches during the build).
+    # --include=dev is required on every install here even though
+    # NODE_ENV=production is set below: npm normally skips devDependencies
+    # (typescript, vite, @types/*) whenever NODE_ENV=production is set,
+    # which breaks both build steps. NODE_ENV=production still applies at
+    # runtime as normal (this only affects what `npm install` fetches
+    # during the build).
     buildCommand: >-
       npm install --include=dev &&
       cd backend && npm install --include=dev && cd .. &&
+      cd frontend && npm install --include=dev && npm run build && cd .. &&
       npx prisma generate --schema=database/prisma/schema.prisma &&
       npx prisma migrate deploy --schema=database/prisma/schema.prisma &&
       cd backend && npm run build
@@ -48,14 +60,19 @@ services:
       # see env.ts's comment on why this must match that exactly.
       - key: TRUST_PROXY_HOPS
         value: "1"
-      # Placeholders — Render assigns the real subdomain on first deploy
-      # (only guaranteed to match this if the name below is available).
-      # Update these three to the actual URLs after the first deploy;
-      # see README.md §13.
+      # Both point at this same service's own confirmed real URL — no
+      # placeholder/guessing needed since frontend and backend are one
+      # service now. Update this if the service is ever renamed.
       - key: CORS_ORIGIN
-        value: https://agrihaul-frontend.onrender.com
+        value: https://agrihaul-backend.onrender.com
       - key: PUBLIC_BASE_URL
         value: https://agrihaul-backend.onrender.com
+      # Empty on purpose — the frontend calls its API with a *relative*
+      # path (see frontend/src/lib/apiClient.ts) when this is unset, which
+      # resolves against whatever origin actually served the page. That's
+      # correct and URL-guess-proof for a same-origin deploy like this one.
+      - key: VITE_API_URL
+        value: ""
       # Secrets — sync: false means Render prompts you to type these in
       # yourself when the blueprint is first created, and never stores
       # them in this file or the repo.
@@ -65,24 +82,3 @@ services:
         sync: false
       - key: TWILIO_PHONE_NUMBER
         sync: false
-
-  - name: agrihaul-frontend
-    type: web
-    runtime: static
-    # --include=dev — same reasoning as the backend service above: Render
-    # defaults NODE_ENV to production for builds too, which would
-    # otherwise skip vite/typescript (both devDependencies) and break
-    # this build before it starts.
-    buildCommand: cd frontend && npm install --include=dev && npm run build
-    staticPublishPath: frontend/dist
-    envVars:
-      # Placeholder — see the backend's CORS_ORIGIN comment above; update
-      # after the first deploy if the backend's assigned URL differs.
-      - key: VITE_API_URL
-        value: https://agrihaul-backend.onrender.com
-    routes:
-      # SPA fallback — React Router handles routing client-side, so every
-      # path needs to actually serve index.html rather than 404ing.
-      - type: rewrite
-        source: /*
-        destination: /index.html
