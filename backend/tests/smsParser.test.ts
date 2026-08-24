@@ -91,6 +91,24 @@ describe("parseIncomingSms", () => {
     });
   });
 
+  it("recognizes dash format even when only one side of each dash has a space", () => {
+    // A very common phone-typing style — no space before the dash, one
+    // after — that a real demo message hit and silently mis-parsed before
+    // this fix (the whole message got shredded into the wrong fields
+    // instead of being read as dash-separated).
+    const result = parseIncomingSms("Rushank- maize-100kg- belvaux- Tuesday");
+    expect(result.intent).toBe("PICKUP_REQUEST");
+    if (result.intent !== "PICKUP_REQUEST" || !result.confident) throw new Error("expected confident parse");
+    expect(result.fields).toEqual({
+      name: "Rushank",
+      product: "Maize",
+      quantity: 100,
+      unit: "KG",
+      location: "Belvaux",
+      requestedPickupDate: expect.any(Date),
+    });
+  });
+
   it("flags a zero quantity for review instead of creating an empty pickup", () => {
     const result = parseIncomingSms("KWAME - MAIZE - 0KG - AJUMAKO");
     expect(result.intent).toBe("PICKUP_REQUEST");

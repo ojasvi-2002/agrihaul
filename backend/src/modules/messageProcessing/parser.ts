@@ -154,13 +154,17 @@ export function parseIncomingSms(raw: string, referenceDate: Date = new Date()):
   let locationRaw: string | undefined;
   let dateRaw: string | undefined;
 
-  // A genuine dash-separator has whitespace on both sides ("NAME - PRODUCT"),
-  // which a hyphen embedded in a single word ("Cape-Coast") never does.
-  // Requiring that distinguishes "farmer used the dash format" from
-  // "farmer used spaces but one place/product name happens to have a
-  // hyphen in it" — the latter must fall through to whitespace parsing
-  // below, or it gets shredded on the incidental hyphen instead.
-  const looksLikeDashFormat = /\s-\s/.test(text);
+  // A genuine dash-separator has whitespace on at least one side ("NAME -
+  // PRODUCT", "NAME- PRODUCT", "NAME -PRODUCT" — real phone-typing habits
+  // vary on which side gets the space), which a hyphen embedded in a
+  // single word ("Cape-Coast") never has on *either* side. Requiring at
+  // least one distinguishes "farmer used the dash format" from "farmer
+  // used spaces but one place/product name happens to have a hyphen in
+  // it" — the latter must fall through to whitespace parsing below, or it
+  // gets shredded on the incidental hyphen instead. (Originally required
+  // whitespace on both sides, which rejected the very common "word- word"
+  // phone-typing style and silently mis-parsed it as free text instead.)
+  const looksLikeDashFormat = /\s-|-\s/.test(text);
 
   if (looksLikeDashFormat) {
     // Farmer used the dash format — trust it exactly as given, even if a
