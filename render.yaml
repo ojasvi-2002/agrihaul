@@ -22,9 +22,15 @@ services:
     # why those live at the repo root, not in backend/package.json),
     # then backend's own deps, generates the Prisma client, applies any
     # pending migrations, then compiles TypeScript.
+    #
+    # --include=dev is required here even though NODE_ENV=production is
+    # set below: npm normally skips devDependencies (typescript, @types/*)
+    # whenever NODE_ENV=production is set, which breaks the `tsc` build
+    # step itself. NODE_ENV=production still applies at runtime as normal
+    # (this only affects what `npm install` fetches during the build).
     buildCommand: >-
-      npm install &&
-      cd backend && npm install && cd .. &&
+      npm install --include=dev &&
+      cd backend && npm install --include=dev && cd .. &&
       npx prisma generate --schema=database/prisma/schema.prisma &&
       npx prisma migrate deploy --schema=database/prisma/schema.prisma &&
       cd backend && npm run build
@@ -63,7 +69,11 @@ services:
   - name: agrihaul-frontend
     type: web
     runtime: static
-    buildCommand: cd frontend && npm install && npm run build
+    # --include=dev — same reasoning as the backend service above: Render
+    # defaults NODE_ENV to production for builds too, which would
+    # otherwise skip vite/typescript (both devDependencies) and break
+    # this build before it starts.
+    buildCommand: cd frontend && npm install --include=dev && npm run build
     staticPublishPath: frontend/dist
     envVars:
       # Placeholder — see the backend's CORS_ORIGIN comment above; update
