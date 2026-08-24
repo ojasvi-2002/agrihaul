@@ -2,7 +2,6 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { env } from "../config/env";
 import { findUserByEmail } from "../repositories/user.repository";
-import { createOrganizationWithOwner } from "../repositories/organization.repository";
 import {
   createSession,
   deleteSessionByTokenHash,
@@ -10,7 +9,6 @@ import {
 } from "../repositories/session.repository";
 import { closeOpenImpersonationLog } from "../repositories/impersonationLog.repository";
 import { ServiceError } from "../utils/serviceErrors";
-import { uniqueSlugFor } from "../utils/slugify";
 
 function generateRawToken() {
   return crypto.randomBytes(32).toString("hex");
@@ -23,9 +21,10 @@ export function hashToken(rawToken: string) {
 }
 
 // Exported so other flows that log a user in immediately after creating
-// their account (signup below, and team.service.ts's acceptInvite) share
-// the exact same token-generation logic rather than each reimplementing
-// it.
+// their account (team.service.ts's acceptInvite — the only way an
+// organization account gets created now; see signupRequest.service.ts)
+// share the exact same token-generation logic rather than each
+// reimplementing it.
 export async function createSessionFor(userId: string) {
   const rawToken = generateRawToken();
   const expiresAt = new Date(Date.now() + env.sessionTtlMs);
@@ -50,26 +49,6 @@ export async function login(email: string, password: string) {
 
   const { rawToken, expiresAt } = await createSessionFor(user.id);
   return { rawToken, expiresAt, user };
-}
-
-// CLAUDE.md Phase 12: "Create organization -> Create owner" — the one
-// place a brand new tenant boundary gets created. Logs the new owner in
-// immediately afterward, same as a normal login.
-export async function signup(organizationName: string, ownerName: string, email: string, password: string) {
-  const existingUser = await findUserByEmail(email);
-  if (existingUser) {
-    throw new ServiceError(400, "An account with this email already exists");
-  }
-
-  const slug = await uniqueSlugFor(organizationName);
-  const passwordHash = await bcrypt.hash(password, 10);
-  const { organization, user } = await createOrganizationWithOwner(
-    { name: organizationName, slug },
-    { name: ownerName, email, passwordHash },
-  );
-
-  const { rawToken, expiresAt } = await createSessionFor(user.id);
-  return { rawToken, expiresAt, user: { ...user, organization } };
 }
 
 export async function logout(rawToken: string) {

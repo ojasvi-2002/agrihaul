@@ -201,7 +201,7 @@ Each controller: parses/validates the request body with a Zod schema, calls the 
 
 | File | Resource |
 |---|---|
-| `auth.controller.ts` | Login, signup, logout, `/me`. Also exports `respondWithSession` — the shared "set cookie + return user/org" helper reused by the accept-invite flow. |
+| `auth.controller.ts` | Login, logout, `/me`. Also exports `respondWithSession` — the shared "set cookie + return user/org" helper reused by the accept-invite flow. |
 | `conversation.controller.ts` | List/get conversations, list/create messages within one. |
 | `dispatch.controller.ts` | Truck recommendation, broadcast-to-drivers, assign a pickup. |
 | `driver.controller.ts` | Driver CRUD. |
@@ -215,6 +215,7 @@ Each controller: parses/validates the request body with a Zod schema, calls the 
 | `platformAdminAuth.controller.ts` | Platform-admin login/logout/`/me` — entirely separate cookie/session from org users. |
 | `platformAdminOrganization.controller.ts` | Platform-admin: list orgs, platform-wide stats, per-org detail, create/suspend/activate an org. |
 | `realtime.controller.ts` | The SSE endpoint — `streamEvents` keeps one HTTP response open per connected browser tab. |
+| `signupRequest.controller.ts` | Public: file a new organization's signup request. Platform-admin: list/approve/reject requests — approving creates the org and emails the requester an OWNER invite. |
 | `team.controller.ts` | Team roster, create/list/revoke invites, and the two public (no-auth) invite-preview/accept endpoints. |
 | `twilioWebhook.controller.ts` | The two Twilio webhook endpoints (`/webhooks/twilio/incoming`, `/status`). |
 | `vehicle.controller.ts` | Vehicle CRUD. |
@@ -225,7 +226,8 @@ The business-logic layer. This is where authorization decisions get made, where 
 
 | File | Responsibility |
 |---|---|
-| `auth.service.ts` | Password verification, session creation/lookup, signup (creates an org + owner in one transaction). Exports `createSessionFor`, reused by the invite-accept flow. |
+| `auth.service.ts` | Password verification, session creation/lookup. Exports `createSessionFor`, reused by the invite-accept flow. |
+| `signupRequest.service.ts` | Files/reviews organization signup requests. Approval atomically claims the request, creates the Organization, then invites the requester as OWNER via the same TeamInvite mechanism as a normal team invite. |
 | `conversation.service.ts` | Conversation/message listing scoped to the caller's org. |
 | `dispatch.service.ts` | The dispatch engine: recommendation, broadcast, atomic assignment, and `handleDriverMessage` (parses a driver's `LOC`/`DONE` SMS and acts on it). |
 | `driver.service.ts`, `farm.service.ts`, `farmer.service.ts`, `vehicle.service.ts` | Standard CRUD with organization-scoping and cross-reference validation (e.g. a farm's `farmerId` must belong to the same org). |
@@ -318,7 +320,7 @@ vitest integration tests, almost all running against the real `app` via `superte
 | `dispatch.test.ts` | Recommendation ranking, broadcast, driver LOC/DONE SMS, assignment, and the concurrent-assign/concurrent-DONE race conditions. |
 | `driverMessageParser.test.ts` | Pure unit tests for the `LOC`/`DONE` parser. |
 | `driversVehicles.test.ts` | Driver/vehicle CRUD and tenant scoping. |
-| `organizationManagement.test.ts` | Signup, org settings, phone numbers, team CRUD/roles. |
+| `organizationManagement.test.ts` | Signup requests (file/approve/reject), org settings, phone numbers, team CRUD/roles. |
 | `pickupProcessing.test.ts` | The full SMS→pickup pipeline: creation, correction, cancellation, farm auto-linking, needs-review flagging. |
 | `platformAdmin.test.ts` | Platform-admin auth, org list/stats/detail, suspend/activate actually blocking access, the two auth realms never crossing. |
 | `realtimeHub.test.ts` | Pure unit tests for the SSE hub's per-org isolation. |
@@ -345,7 +347,7 @@ vitest integration tests, almost all running against the real `app` via `superte
 
 | Folder | Screen |
 |---|---|
-| `auth/` | Login, signup, accept-invite pages, and `AuthContext` (the org-user session state, available app-wide via `useAuth()`). |
+| `auth/` | Login, signup-request, accept-invite pages, and `AuthContext` (the org-user session state, available app-wide via `useAuth()`). |
 | `conversations/` | The message-centric core screen — conversation list + thread + composer, with the live SSE connection wired in. |
 | `pickups/` | Pickup list, recommend/assign flow. |
 | `farmers/`, `farms/`, `drivers/`, `vehicles/` | CRUD registries — search, add, edit. |
@@ -450,7 +452,7 @@ There are **two entirely independent authentication systems** in this app, and t
 | Middleware | `requireAuth` | `requirePlatformAdminAuth` |
 | Login route | `POST /api/auth/login` | `POST /api/platform-admin/auth/login` |
 | Session length | 7 days | 1 day (shorter — higher privilege) |
-| How you get an account | Signup, or accepting a team invite | `scripts/createPlatformAdmin.ts` only — no self-registration |
+| How you get an account | A platform admin approves your signup request, or an existing teammate invites you — both end the same way: an emailed link to set your password | `scripts/createPlatformAdmin.ts` only — no self-registration |
 
 Both use the same underlying mechanism: a random 32-byte token is sent to the browser as a signed, httpOnly cookie; only its SHA-256 hash is ever stored in the database, so a database read alone can never be replayed as a valid session. Passwords are hashed with bcrypt, never stored or logged in plaintext.
 
@@ -463,7 +465,7 @@ Three independent limiters (`backend/src/middleware/rateLimit.middleware.ts`), e
 | Endpoint | Limit |
 |---|---|
 | `POST /api/auth/login` | 10 attempts / 15 minutes |
-| `POST /api/auth/signup` | 10 attempts / hour |
+| `POST /api/signup-requests` | 10 attempts / hour |
 | `POST /api/platform-admin/auth/login` | 5 attempts / 15 minutes (stricter — higher-privilege target) |
 
 `env.trustProxyHops` (default `0`) controls how many reverse-proxy hops Express trusts for `X-Forwarded-For` — this **must** be set correctly (see §11) once deployed behind any real proxy, or the rate limits become bypassable by a spoofed header.
@@ -571,7 +573,7 @@ Run `cd backend && npx tsc --noEmit` and `cd frontend && npx tsc -b` to type-che
 
 There's no substitute for actually clicking through the app. A reasonable pass:
 
-1. **Login/signup** — log in with a seeded account; try creating a brand-new organization via signup.
+1. **Login/signup** — log in with a seeded account; try filing a new organization signup request, then approve it from the platform-admin dashboard and confirm the emailed (dev-console-logged) invite link lets the requester set a password and log in.
 2. **Conversations** — open a conversation, send a reply, confirm it appears; open two browser tabs on the same conversation and confirm a message sent in one appears live in the other (this is the realtime feature).
 3. **Simulate an inbound SMS** without a real Twilio account, using a correctly-signed webhook request:
    ```bash
@@ -609,7 +611,7 @@ Everything below is a real gap, not a hypothetical — none of it has been done 
 - [ ] **Configure the Twilio webhook URLs** in the Twilio console to point at the real deployed backend (`/webhooks/twilio/incoming`, `/webhooks/twilio/status`).
 - [ ] **Bootstrap the real platform-admin account** via `scripts/createPlatformAdmin.ts` — don't rely on the seeded dev one.
 - [ ] **Run the CSV migration scripts against real historical data**, if migrating an existing customer off the old Google Sheets prototype — dry-run first, review the skip report, then `--commit`.
-- [ ] **Decide on signup abuse prevention.** Rate limiting exists, but there's no CAPTCHA — evaluate whether that's needed once signup is reachable by the public internet.
+- [ ] **Decide on signup-request abuse prevention.** No account is ever created without platform-admin approval now, which already blocks the worst case — but rate limiting is the only defense against someone flooding the request queue itself with junk; evaluate whether a CAPTCHA is worth adding once the request form is reachable by the public internet.
 - [ ] **Revisit the OpenStreetMap tile usage policy** (documented inline in `MapPage.tsx`) once traffic is more than a handful of dispatchers — the free public tile server explicitly discourages heavy production load.
 - [ ] **Decide on a hosting provider** for both frontend and backend. `render.yaml` at the repo root gets a free demo deployment running on Render in minutes (see the subsection right after this checklist) — fine for showing prospects, not a substitute for evaluating real production hosting once there's a paying customer.
 - [ ] **Read §14 below** and decide whether any of those gaps matter for your first real customer.
@@ -630,9 +632,16 @@ For demoing to a prospective customer — not a real launch — `render.yaml` at
 4. **Wait for the first deploy** — the build compiles the frontend, then the backend, then runs migrations automatically (`prisma migrate deploy`, baked into `render.yaml`'s build command), so the database ends up with the right tables with no manual step.
 5. **Check the real URL.** `render.yaml` guesses the service URL will be `agrihaul-backend.onrender.com` — Render only honors that if the name is still available. Check the actual URL shown at the top of the service's dashboard page. If it differs from the guess, go to **Environment** and update `CORS_ORIGIN` and `PUBLIC_BASE_URL` to match (both should be the same real URL) → save (triggers a redeploy). `VITE_API_URL` is deliberately left empty and needs no fixing — the frontend calls its API with a relative path, which resolves correctly against whatever address actually served the page.
 6. **Point Twilio at the real backend.** Twilio console → your number → *Messaging Configuration* → set "A message comes in" to `https://<your-real-url>/webhooks/twilio/incoming` (POST) and the status callback to `https://<your-real-url>/webhooks/twilio/status`.
-7. **Create your demo org.** Open the service's URL and use the normal signup page to create an organization + owner account — no seed script needed against the remote database.
-8. **Add the phone number.** Log in → Settings → Phone Numbers → add the Twilio number from step 1.
-9. **Test it for real** — text the Twilio number from the verified demo phone, confirm it shows up in Conversations, reply from the app, confirm the reply SMS arrives.
+7. **Bootstrap your own platform-admin account** — signup no longer creates an account directly (every new organization is held for platform-admin review first; see §7a below). On the Render dashboard, open the `agrihaul-backend` service → **Shell** tab, and run:
+   ```
+   npx tsx scripts/createPlatformAdmin.ts
+   ```
+   Follow its prompts for your name/email/password. This is the account you'll use to approve organizations going forward.
+8. **Create your demo org.** Open the service's URL → *Request access* → fill in the form. This only files a request — nothing is created yet.
+9. **Approve it.** Log into `/platform-admin/login` with the account from step 7, find the pending request on the dashboard, click **Approve**. This creates the organization and (dev-mode) logs an invite link to the server console instead of sending a real email — check the Render **Logs** tab for it.
+10. **Set your password.** Open that logged invite link, set a password, and you're in as the org's OWNER.
+11. **Add the phone number.** Settings → Phone Numbers → add the Twilio number from step 1.
+12. **Test it for real** — text the Twilio number from the verified demo phone, confirm it shows up in Conversations, reply from the app, confirm the reply SMS arrives.
 
 **Before each demo session after that:** nothing — the URL and webhook are already configured, so it just works. Only re-check step 5 if you ever redeploy under a different service name.
 

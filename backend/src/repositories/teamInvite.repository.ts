@@ -3,7 +3,16 @@ import type { UserRole } from "@prisma/client";
 
 export function createInvite(
   organizationId: string,
-  data: { name: string; email: string; role: UserRole; tokenHash: string; invitedByUserId: string; expiresAt: Date },
+  data: {
+    name: string;
+    email: string;
+    role: UserRole;
+    tokenHash: string;
+    // null = invited by the platform itself (an approved
+    // OrganizationSignupRequest), not an existing team member.
+    invitedByUserId: string | null;
+    expiresAt: Date;
+  },
 ) {
   return prisma.teamInvite.create({ data: { organizationId, ...data } });
 }

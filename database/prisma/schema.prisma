@@ -157,15 +157,45 @@ model TeamInvite {
   email           String
   role            UserRole
   tokenHash       String    @unique
-  invitedByUserId String
+  // Nullable: null means this invite was created by the platform itself
+  // (an approved OrganizationSignupRequest inviting the org's first
+  // OWNER — see below), not by an existing team member.
+  invitedByUserId String?
   expiresAt       DateTime
   acceptedAt      DateTime?
   createdAt       DateTime  @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  invitedBy    User         @relation(fields: [invitedByUserId], references: [id], onDelete: Cascade)
+  invitedBy    User?        @relation(fields: [invitedByUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
+}
+
+enum SignupRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// A prospective organization's self-serve signup, held for platform-admin
+// review before any Organization/User record exists — CLAUDE.md §34's
+// platform administration extended to gate onboarding itself, per the
+// developer's explicit decision (2026-08-24): no organization account
+// gets created until a platform admin approves the request.
+model OrganizationSignupRequest {
+  id               String              @id @default(cuid())
+  organizationName String
+  ownerName        String
+  email            String
+  status           SignupRequestStatus @default(PENDING)
+  // Set once approved — informational link to the Organization this
+  // request produced, not a foreign key (nothing needs to query
+  // Organization -> its originating request).
+  createdOrganizationId String?
+  reviewedAt       DateTime?
+  createdAt        DateTime            @default(now())
+
+  @@index([status])
 }
 
 // Server-side session. The cookie holds a random opaque token; only its

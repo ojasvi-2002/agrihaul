@@ -7,6 +7,7 @@ import { env } from "./config/env";
 import { ServiceError } from "./utils/serviceErrors";
 import { healthRouter } from "./routes/health.routes";
 import { authRouter } from "./routes/auth.routes";
+import { signupRequestRouter } from "./routes/signupRequest.routes";
 import { organizationRouter } from "./routes/organization.routes";
 import { farmerRouter } from "./routes/farmer.routes";
 import { farmRouter } from "./routes/farm.routes";
@@ -42,6 +43,7 @@ app.use(cookieParser(env.authSecret));
 
 app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/signup-requests", signupRequestRouter);
 app.use("/api/organizations", organizationRouter);
 app.use("/api/farmers", farmerRouter);
 app.use("/api/farms", farmRouter);

@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 import { env } from "../config/env";
 import { loginSchema } from "../validators/auth.validator";
-import { signupSchema } from "../validators/signup.validator";
 import * as authService from "../services/auth.service";
 import { sendError } from "../utils/httpErrors";
 
@@ -52,21 +51,6 @@ export async function postLogin(req: Request, res: Response) {
   if (!result) return sendError(res, 401, "Invalid email or password");
 
   respondWithSession(res, result);
-}
-
-export async function postSignup(req: Request, res: Response) {
-  const parsed = signupSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return sendError(res, 400, parsed.error.issues[0]?.message || "Invalid signup data");
-  }
-
-  const result = await authService.signup(
-    parsed.data.organizationName,
-    parsed.data.ownerName,
-    parsed.data.email,
-    parsed.data.password,
-  );
-  respondWithSession(res, result, 201);
 }
 
 export async function postLogout(req: Request, res: Response) {

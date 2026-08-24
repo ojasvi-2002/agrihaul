@@ -6,6 +6,7 @@ import type {
   PlatformDriver,
   PlatformFarmer,
   PlatformStats,
+  SignupRequest,
 } from "../../types/api";
 
 export function listOrganizations() {
@@ -60,4 +61,18 @@ export function suspendOrganization(id: string) {
 
 export function activateOrganization(id: string) {
   return apiFetch(`/api/platform-admin/organizations/${id}/activate`, { method: "POST" });
+}
+
+export function listSignupRequests() {
+  return apiFetch<{ requests: SignupRequest[] }>("/api/platform-admin/signup-requests").then((r) => r.requests);
+}
+
+export function approveSignupRequest(id: string) {
+  return apiFetch<{ organization: OrganizationWithCounts }>(`/api/platform-admin/signup-requests/${id}/approve`, {
+    method: "POST",
+  }).then((r) => r.organization);
+}
+
+export function rejectSignupRequest(id: string) {
+  return apiFetch(`/api/platform-admin/signup-requests/${id}/reject`, { method: "POST" });
 }

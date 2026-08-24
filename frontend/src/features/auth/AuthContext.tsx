@@ -8,7 +8,10 @@ type AuthState = {
   organization: Organization | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (organizationName: string, ownerName: string, email: string, password: string) => Promise<void>;
+  // Files a request for platform-admin review — does not create an
+  // account or log anyone in (2026-08-24: self-serve signup now requires
+  // approval; see signupRequest.service.ts on the backend).
+  submitSignupRequest: (organizationName: string, ownerName: string, email: string) => Promise<void>;
   acceptInvite: (token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   viewAs: (userId: string) => Promise<void>;
@@ -46,13 +49,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOrganization(res.organization);
   }
 
-  async function signup(organizationName: string, ownerName: string, email: string, password: string) {
-    const res = await apiFetch<{ user: User; organization: Organization }>("/api/auth/signup", {
+  async function submitSignupRequest(organizationName: string, ownerName: string, email: string) {
+    await apiFetch("/api/signup-requests", {
       method: "POST",
-      body: JSON.stringify({ organizationName, ownerName, email, password }),
+      body: JSON.stringify({ organizationName, ownerName, email }),
     });
-    setUser(res.user);
-    setOrganization(res.organization);
   }
 
   async function acceptInvite(token: string, password: string) {
@@ -87,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, organization, loading, login, signup, acceptInvite, logout, viewAs, stopViewingAs }}
+      value={{ user, organization, loading, login, submitSignupRequest, acceptInvite, logout, viewAs, stopViewingAs }}
     >
       {children}
     </AuthContext.Provider>

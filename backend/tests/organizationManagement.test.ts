@@ -7,8 +7,23 @@ import bcrypt from "bcryptjs";
 import { app } from "../src/app";
 import { prisma } from "../src/lib/prisma";
 
-describe("signup", () => {
+// Self-serve signup no longer creates an account directly (developer's
+// explicit decision, 2026-08-24): it only files a request, which a
+// platform admin must approve before the Organization/User ever exists.
+describe("organization signup requests", () => {
   const createdOrgIds: string[] = [];
+  let adminCookie: string[];
+
+  beforeAll(async () => {
+    const email = `signup-request-admin-${Date.now()}@agrihaul.internal`;
+    await prisma.platformAdmin.create({
+      data: { name: "Signup Request Test Admin", email, passwordHash: await bcrypt.hash("AdminPassword123!", 10) },
+    });
+    const loginRes = await request(app)
+      .post("/api/platform-admin/auth/login")
+      .send({ email, password: "AdminPassword123!" });
+    adminCookie = loginRes.headers["set-cookie"];
+  });
 
   afterAll(async () => {
     for (const id of createdOrgIds) {
@@ -16,63 +31,109 @@ describe("signup", () => {
     }
   });
 
-  it("creates a new organization and owner, and logs them in immediately", async () => {
-    const email = `signup-test-${Date.now()}@test.local`;
-    const res = await request(app).post("/api/auth/signup").send({
-      organizationName: "Brand New Org",
-      ownerName: "New Owner",
-      email,
-      password: "SignupPassword123!",
-    });
+  it("files a request without creating an account or logging anyone in", async () => {
+    const email = `signup-request-${Date.now()}@test.local`;
+    const res = await request(app)
+      .post("/api/signup-requests")
+      .send({ organizationName: "Brand New Org", ownerName: "New Owner", email });
 
     expect(res.status).toBe(201);
-    expect(res.body.user.role).toBe("OWNER");
-    expect(res.body.organization.name).toBe("Brand New Org");
-    expect(res.headers["set-cookie"]).toBeDefined();
-    createdOrgIds.push(res.body.organization.id);
+    expect(res.headers["set-cookie"]).toBeUndefined();
 
-    // Actually logged in — the session cookie works immediately.
-    const meRes = await request(app).get("/api/auth/me").set("Cookie", res.headers["set-cookie"]);
-    expect(meRes.status).toBe(200);
-    expect(meRes.body.user.email).toBe(email);
+    const stored = await prisma.organizationSignupRequest.findFirst({ where: { email } });
+    expect(stored?.status).toBe("PENDING");
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
   });
 
-  it("gives two organizations with the same name different slugs", async () => {
-    const email1 = `signup-collide-1-${Date.now()}@test.local`;
-    const email2 = `signup-collide-2-${Date.now()}@test.local`;
-
-    const res1 = await request(app)
-      .post("/api/auth/signup")
-      .send({ organizationName: "Same Name Co", ownerName: "Owner One", email: email1, password: "Password123!" });
-    const res2 = await request(app)
-      .post("/api/auth/signup")
-      .send({ organizationName: "Same Name Co", ownerName: "Owner Two", email: email2, password: "Password123!" });
-
-    createdOrgIds.push(res1.body.organization.id, res2.body.organization.id);
-    expect(res1.body.organization.slug).not.toBe(res2.body.organization.slug);
-  });
-
-  it("rejects signup with an email that's already in use", async () => {
-    const email = `signup-dup-${Date.now()}@test.local`;
+  it("rejects a duplicate request while one is still pending for that email", async () => {
+    const email = `signup-request-dup-${Date.now()}@test.local`;
     const first = await request(app)
-      .post("/api/auth/signup")
-      .send({ organizationName: "First Org", ownerName: "Owner", email, password: "Password123!" });
-    createdOrgIds.push(first.body.organization.id);
+      .post("/api/signup-requests")
+      .send({ organizationName: "First Org", ownerName: "Owner", email });
+    expect(first.status).toBe(201);
 
     const second = await request(app)
-      .post("/api/auth/signup")
-      .send({ organizationName: "Second Org", ownerName: "Owner", email, password: "Password123!" });
+      .post("/api/signup-requests")
+      .send({ organizationName: "Second Org", ownerName: "Owner", email });
     expect(second.status).toBe(400);
   });
 
-  it("rejects a password shorter than 8 characters", async () => {
-    const res = await request(app).post("/api/auth/signup").send({
-      organizationName: "Short Password Org",
-      ownerName: "Owner",
-      email: `signup-short-${Date.now()}@test.local`,
-      password: "short",
+  it("rejects a request for an email that's already a real user", async () => {
+    const email = `signup-request-existing-${Date.now()}@test.local`;
+    const org = await prisma.organization.create({
+      data: { name: "Existing User Org", slug: `existing-user-org-${Date.now()}` },
     });
+    createdOrgIds.push(org.id);
+    await prisma.user.create({
+      data: { organizationId: org.id, name: "Existing", email, role: "OWNER", passwordHash: "x" },
+    });
+
+    const res = await request(app)
+      .post("/api/signup-requests")
+      .send({ organizationName: "Another Org", ownerName: "Owner", email });
     expect(res.status).toBe(400);
+  });
+
+  it("lists pending requests for the platform admin, newest first", async () => {
+    const email = `signup-request-list-${Date.now()}@test.local`;
+    await request(app)
+      .post("/api/signup-requests")
+      .send({ organizationName: "Listed Org", ownerName: "Owner", email });
+
+    const listed = await request(app).get("/api/platform-admin/signup-requests").set("Cookie", adminCookie);
+    expect(listed.status).toBe(200);
+    expect(listed.body.requests.map((r: { email: string }) => r.email)).toContain(email);
+  });
+
+  it("refuses list/approve/reject to anyone but a platform admin", async () => {
+    const unauth = await request(app).get("/api/platform-admin/signup-requests");
+    expect(unauth.status).toBe(401);
+  });
+
+  it("approving creates the organization and an OWNER invite, and can't be approved twice", async () => {
+    const email = `signup-request-approve-${Date.now()}@test.local`;
+    const submitted = await request(app)
+      .post("/api/signup-requests")
+      .send({ organizationName: "Approved Org", ownerName: "Future Owner", email });
+    expect(submitted.status).toBe(201);
+
+    const request_ = await prisma.organizationSignupRequest.findFirstOrThrow({ where: { email } });
+
+    const approve = await request(app)
+      .post(`/api/platform-admin/signup-requests/${request_.id}/approve`)
+      .set("Cookie", adminCookie);
+    expect(approve.status).toBe(200);
+    expect(approve.body.organization.name).toBe("Approved Org");
+    createdOrgIds.push(approve.body.organization.id);
+
+    const invite = await prisma.teamInvite.findFirst({ where: { organizationId: approve.body.organization.id, email } });
+    expect(invite?.role).toBe("OWNER");
+    expect(invite?.invitedByUserId).toBeNull();
+
+    const reviewed = await prisma.organizationSignupRequest.findUnique({ where: { id: request_.id } });
+    expect(reviewed?.status).toBe("APPROVED");
+    expect(reviewed?.createdOrganizationId).toBe(approve.body.organization.id);
+
+    const secondApprove = await request(app)
+      .post(`/api/platform-admin/signup-requests/${request_.id}/approve`)
+      .set("Cookie", adminCookie);
+    expect(secondApprove.status).toBe(400);
+  });
+
+  it("rejecting marks the request rejected without creating an organization", async () => {
+    const email = `signup-request-reject-${Date.now()}@test.local`;
+    await request(app).post("/api/signup-requests").send({ organizationName: "Rejected Org", ownerName: "Owner", email });
+    const request_ = await prisma.organizationSignupRequest.findFirstOrThrow({ where: { email } });
+
+    const reject = await request(app)
+      .post(`/api/platform-admin/signup-requests/${request_.id}/reject`)
+      .set("Cookie", adminCookie);
+    expect(reject.status).toBe(204);
+
+    const reviewed = await prisma.organizationSignupRequest.findUnique({ where: { id: request_.id } });
+    expect(reviewed?.status).toBe("REJECTED");
+    expect(reviewed?.createdOrganizationId).toBeNull();
+    expect(await prisma.organization.findFirst({ where: { name: "Rejected Org" } })).toBeNull();
   });
 });
 

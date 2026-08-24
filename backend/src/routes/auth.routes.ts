@@ -1,12 +1,13 @@
 import { Router } from "express";
-import { postLogin, postSignup, postLogout, getMe } from "../controllers/auth.controller";
+import { postLogin, postLogout, getMe } from "../controllers/auth.controller";
 import { postStopImpersonation } from "../controllers/impersonation.controller";
 import { requireAuth } from "../middleware/auth.middleware";
-import { loginRateLimiter, signupRateLimiter } from "../middleware/rateLimit.middleware";
+import { loginRateLimiter } from "../middleware/rateLimit.middleware";
 
+// No /signup here — see signupRequest.routes.ts. Self-serve signup was
+// replaced with a platform-admin-approved request flow (2026-08-24).
 export const authRouter = Router();
 
-authRouter.post("/signup", signupRateLimiter, postSignup);
 authRouter.post("/login", loginRateLimiter, postLogin);
 authRouter.post("/logout", postLogout);
 authRouter.get("/me", requireAuth, getMe);

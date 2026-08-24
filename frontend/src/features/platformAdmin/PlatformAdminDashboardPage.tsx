@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { usePlatformAdminAuth } from "./PlatformAdminAuthContext";
-import type { OrganizationWithCounts, PlatformStats } from "../../types/api";
+import type { OrganizationWithCounts, PlatformStats, SignupRequest } from "../../types/api";
 import * as api from "./platformAdminApi";
 import { ApiError } from "../../lib/apiClient";
 import { ThemeToggleButton } from "../../components/ThemeToggleButton";
@@ -74,6 +74,8 @@ export function PlatformAdminDashboardPage() {
         {error && <p className="page-error">{error}</p>}
         {loading && <div className="empty-state">Loading…</div>}
 
+        {!loading && <SignupRequestsSection onReviewed={refresh} />}
+
         {!loading && stats && (
           <div className="stat-strip">
             <StatCard value={stats.totalOrganizations} label="Organizations" />
@@ -141,6 +143,102 @@ export function PlatformAdminDashboardPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// The actionable inbox for the new "every organization is reviewed
+// before it exists" gate (developer's explicit decision, 2026-08-24) —
+// approving here creates the real Organization and emails the requester
+// an invite link to set their password (the same flow as a normal team
+// invite). Renders nothing once there's no pending request, so it never
+// clutters the dashboard when the queue is empty.
+function SignupRequestsSection({ onReviewed }: { onReviewed: () => void }) {
+  const [requests, setRequests] = useState<SignupRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      setRequests(await api.listSignupRequests());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to load signup requests");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const pending = requests.filter((r) => r.status === "PENDING");
+
+  async function handleApprove(id: string) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await api.approveSignupRequest(id);
+      await refresh();
+      onReviewed();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to approve this request");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleReject(id: string) {
+    setBusyId(id);
+    setError(null);
+    try {
+      await api.rejectSignupRequest(id);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to reject this request");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loading || pending.length === 0) return null;
+
+  return (
+    <section className="settings-section">
+      <div className="registry-header">
+        <h2>Pending signup requests ({pending.length})</h2>
+      </div>
+      {error && <p className="page-error">{error}</p>}
+      <table className="registry-table">
+        <thead>
+          <tr>
+            <th>Organization</th>
+            <th>Owner</th>
+            <th>Email</th>
+            <th>Requested</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {pending.map((r) => (
+            <tr key={r.id}>
+              <td>{r.organizationName}</td>
+              <td>{r.ownerName}</td>
+              <td className="mono">{r.email}</td>
+              <td>{new Date(r.createdAt).toLocaleString()}</td>
+              <td>
+                <button className="btn-sm" disabled={busyId === r.id} onClick={() => handleApprove(r.id)}>
+                  Approve
+                </button>{" "}
+                <button className="btn-ghost btn-sm" disabled={busyId === r.id} onClick={() => handleReject(r.id)}>
+                  Reject
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
 

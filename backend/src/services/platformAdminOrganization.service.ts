@@ -37,10 +37,12 @@ export async function getOrganizationDispatchLog(id: string) {
   return listPickupRequestsForPlatform(id);
 }
 
-// Reuses the exact same transactional org+owner creation as self-serve
-// signup (Phase 12) — a platform admin setting up an org on a customer's
-// behalf shouldn't be a different code path from the one that's already
-// tested to never leave an orphaned organization.
+// A platform admin creating an org directly (trusting themselves, no
+// approval loop needed since they *are* the approver) — distinct from
+// the public signup-request flow in signupRequest.service.ts, which
+// creates the org without a password and invites the owner by email
+// instead. Both ultimately share createOrganizationWithOwner's
+// transactional org+owner creation where it applies.
 export async function createOrganization(data: { organizationName: string; ownerName: string; email: string; password: string }) {
   const existingUser = await findUserByEmail(data.email);
   if (existingUser) {

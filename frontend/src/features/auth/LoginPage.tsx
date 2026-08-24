@@ -61,7 +61,7 @@ export function LoginPage() {
         </button>
 
         <p className="login-footer-link">
-          New here? <Link to="/signup">Create an organization</Link>
+          New here? <Link to="/signup">Request access for your organization</Link>
         </p>
       </form>
     </div>

@@ -35,6 +35,19 @@ export type TeamInvite = {
   createdAt: string;
 };
 
+export type SignupRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export type SignupRequest = {
+  id: string;
+  organizationName: string;
+  ownerName: string;
+  email: string;
+  status: SignupRequestStatus;
+  createdOrganizationId: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+};
+
 export type PlatformAdmin = {
   id: string;
   name: string;

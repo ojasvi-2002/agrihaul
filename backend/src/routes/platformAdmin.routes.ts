@@ -13,11 +13,19 @@ import {
   suspendOrganization,
   activateOrganization,
 } from "../controllers/platformAdminOrganization.controller";
+import {
+  listSignupRequests,
+  postApproveSignupRequest,
+  postRejectSignupRequest,
+} from "../controllers/signupRequest.controller";
 
 // Mounted at /api/platform-admin — entirely separate from /api/auth and
 // /api/organizations, which belong to the organization-user realm. No
-// signup route here on purpose: platform admins are provisioned via
-// scripts/createPlatformAdmin.ts, never self-registered.
+// self-registration route here: a platform admin's own account is
+// provisioned via scripts/createPlatformAdmin.ts, never self-registered.
+// A prospective *organization*'s signup, by contrast, does go through a
+// public endpoint (see signupRequest.routes.ts) — it just lands here for
+// review rather than creating an account immediately.
 export const platformAdminRouter = Router();
 
 platformAdminRouter.post("/auth/login", platformAdminLoginRateLimiter, postLogin);
@@ -36,3 +44,8 @@ platformAdminRouter.get("/organizations/:id/pickups", getDispatchLog);
 platformAdminRouter.post("/organizations", createOrganization);
 platformAdminRouter.post("/organizations/:id/suspend", suspendOrganization);
 platformAdminRouter.post("/organizations/:id/activate", activateOrganization);
+
+platformAdminRouter.use("/signup-requests", requirePlatformAdminAuth);
+platformAdminRouter.get("/signup-requests", listSignupRequests);
+platformAdminRouter.post("/signup-requests/:id/approve", postApproveSignupRequest);
+platformAdminRouter.post("/signup-requests/:id/reject", postRejectSignupRequest);
