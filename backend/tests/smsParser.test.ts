@@ -109,6 +109,48 @@ describe("parseIncomingSms", () => {
     });
   });
 
+  describe("keyword-extraction fallback (free-form phrasing)", () => {
+    it("parses a natural sentence when quantity, product, and location are all findable", () => {
+      const result = parseIncomingSms("Hey its oli 50 kg olives ready for pickup at belval on sat");
+      expect(result.intent).toBe("PICKUP_REQUEST");
+      if (result.intent !== "PICKUP_REQUEST" || !result.confident) throw new Error("expected confident parse");
+      expect(result.fields).toEqual({
+        product: "Olives",
+        quantity: 50,
+        unit: "KG",
+        location: "Belval",
+        requestedPickupDate: expect.any(Date),
+      });
+      // Keyword mode never invents a farmer name — the sender's phone
+      // number already identifies them.
+      expect(result.fields.name).toBeUndefined();
+    });
+
+    it("still refuses to guess a location that was never mentioned", () => {
+      const result = parseIncomingSms("Hey, I have 100kg maize ready for pickup Tuesday");
+      expect(result.intent).toBe("PICKUP_REQUEST");
+      if (result.intent !== "PICKUP_REQUEST") throw new Error("expected pickup intent");
+      expect(result.confident).toBe(false);
+    });
+
+    it("doesn't confidently match a crop that isn't on the known list", () => {
+      const result = parseIncomingSms("Hey its oli 50kg durian ready at belval on sat");
+      expect(result.intent).toBe("PICKUP_REQUEST");
+      if (result.intent !== "PICKUP_REQUEST") throw new Error("expected pickup intent");
+      expect(result.confident).toBe(false);
+    });
+
+    it("recognizes other unit words and prepositions", () => {
+      const result = parseIncomingSms("its oli, 3 bags of rice ready from north farm");
+      expect(result.intent).toBe("PICKUP_REQUEST");
+      if (result.intent !== "PICKUP_REQUEST" || !result.confident) throw new Error("expected confident parse");
+      expect(result.fields.product).toBe("Rice");
+      expect(result.fields.quantity).toBe(3);
+      expect(result.fields.unit).toBe("BAGS");
+      expect(result.fields.location).toBe("North Farm");
+    });
+  });
+
   it("flags a zero quantity for review instead of creating an empty pickup", () => {
     const result = parseIncomingSms("KWAME - MAIZE - 0KG - AJUMAKO");
     expect(result.intent).toBe("PICKUP_REQUEST");

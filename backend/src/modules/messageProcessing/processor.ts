@@ -79,8 +79,15 @@ export async function processIncomingMessage(params: {
 
   // Phase 6 creates unknown farmers with their phone number as a
   // placeholder name. If they've now texted their real name, use it —
-  // it's literally what they typed, not invented (§29).
-  if (params.farmerName === params.farmerPhoneNumber && result.fields.name !== params.farmerPhoneNumber) {
+  // it's literally what they typed, not invented (§29). Keyword-mode
+  // parses (parser.ts's parseByKeyword) never populate `name` at all —
+  // no reliable way to isolate it from filler words like "Hey its
+  // Kwame" — so there's nothing to fill in from those messages.
+  if (
+    result.fields.name &&
+    params.farmerName === params.farmerPhoneNumber &&
+    result.fields.name !== params.farmerPhoneNumber
+  ) {
     await updateFarmer(params.organizationId, params.farmerId, { name: result.fields.name });
   }
 

@@ -1,19 +1,30 @@
 // Parses inbound farmer SMS into structured pickup-request fields.
 // Migrated from js/intake.js (see docs/CURRENT_SYSTEM.md §5), extended
-// with date extraction (CLAUDE.md Phase 7) and a CANCEL intent.
+// with date extraction (CLAUDE.md Phase 7), a CANCEL intent, and a
+// keyword-extraction fallback (2026-08-24 — not everyone remembers the
+// exact format) for free-form phrasing.
 //
-// Format (confirmed with the developer — the phone number already
-// identifies the farmer via Phase 6, but NAME is kept to match existing
-// onboarding materials):
-//   NAME - PRODUCT - QUANTITY - LOCATION [- DATE]
-//   e.g. KWAME - MAIZE - 200KG - AJUMAKO - FRIDAY
+// Two parsing strategies, tried in order:
+//   1. Structured — NAME - PRODUCT - QUANTITY - LOCATION [- DATE], e.g.
+//      KWAME - MAIZE - 200KG - AJUMAKO - FRIDAY. Position-based, exact.
+//   2. Keyword fallback — only tried when (1) isn't confident. Scans the
+//      whole message for a quantity+unit anywhere, a known crop name
+//      anywhere, a date word anywhere, and a location after
+//      at/from/near — order-independent, for messages like "Hey its
+//      Kwame, 200kg maize ready at Ajumako on Friday".
 //
-// Never guesses at missing or invalid fields (CLAUDE.md §29) — an
-// incomplete/ambiguous message comes back with confident: false and a
-// list of issues, not a best-effort pickup request.
+// Both still refuse to guess at missing/invalid fields (CLAUDE.md §29):
+// keyword mode only returns confident when it actually found a quantity,
+// product, AND location — anything less falls through to the structured
+// pass's confident: false result with its issues list, never a
+// half-invented pickup.
 
 export type ParsedPickupFields = {
-  name: string;
+  // Optional in keyword mode — the sender's phone number already
+  // identifies the farmer (Phase 6); NAME is only ever used to fill in
+  // a still-placeholder farmer name, and keyword mode has no reliable
+  // way to isolate it from filler words ("Hey its Kwame...").
+  name?: string;
   product: string;
   quantity: number;
   unit: string;
@@ -127,15 +138,164 @@ export function titleCase(s: string): string {
   return s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function parseIncomingSms(raw: string, referenceDate: Date = new Date()): ParseResult {
-  const text = (raw || "").trim();
-  if (!text) return { intent: "IRRELEVANT" };
+// A finite, known vocabulary — this is exactly what makes it "keyword
+// extraction" rather than language understanding. A crop not on this
+// list still falls through to needing review rather than being silently
+// dropped; extend the list as real farmer messages reveal gaps.
+const KNOWN_PRODUCTS: Record<string, string> = {
+  maize: "Maize",
+  corn: "Maize",
+  rice: "Rice",
+  olive: "Olives",
+  olives: "Olives",
+  bean: "Beans",
+  beans: "Beans",
+  coffee: "Coffee",
+  cocoa: "Cocoa",
+  wheat: "Wheat",
+  cassava: "Cassava",
+  yam: "Yams",
+  yams: "Yams",
+  cotton: "Cotton",
+  groundnut: "Groundnuts",
+  groundnuts: "Groundnuts",
+  peanut: "Groundnuts",
+  peanuts: "Groundnuts",
+  potato: "Potatoes",
+  potatoes: "Potatoes",
+  tomato: "Tomatoes",
+  tomatoes: "Tomatoes",
+  onion: "Onions",
+  onions: "Onions",
+  millet: "Millet",
+  sorghum: "Sorghum",
+  plantain: "Plantains",
+  plantains: "Plantains",
+  banana: "Bananas",
+  bananas: "Bananas",
+  mango: "Mangoes",
+  mangoes: "Mangoes",
+  mangos: "Mangoes",
+  cashew: "Cashews",
+  cashews: "Cashews",
+  pepper: "Peppers",
+  peppers: "Peppers",
+  okra: "Okra",
+  cabbage: "Cabbage",
+  cabbages: "Cabbage",
+};
 
-  const upper = text.toUpperCase();
-  if (upper === "CANCEL" || upper.startsWith("CANCEL ")) {
-    return { intent: "CANCEL" };
+function findKnownProduct(text: string): string | null {
+  const words = text.toLowerCase().match(/[a-z]+/g) ?? [];
+  for (const word of words) {
+    if (KNOWN_PRODUCTS[word]) return KNOWN_PRODUCTS[word];
   }
+  return null;
+}
 
+const UNIT_WORDS = "kilograms?|kgs?|bags?|tonnes?|tons?|litres?|liters?|crates?|sacks?|baskets?|l";
+const QUANTITY_ANYWHERE_PATTERN = new RegExp(`(\\d+(?:\\.\\d+)?)\\s*(${UNIT_WORDS})\\b`, "i");
+
+function normalizeUnit(raw: string): string {
+  const u = raw.toLowerCase();
+  if (u.startsWith("kilogram") || u.startsWith("kg")) return "KG";
+  if (u.startsWith("bag")) return "BAGS";
+  if (u.startsWith("ton")) return "TON";
+  if (u.startsWith("litre") || u.startsWith("liter") || u === "l") return "L";
+  if (u.startsWith("crate")) return "CRATES";
+  if (u.startsWith("sack")) return "SACKS";
+  if (u.startsWith("basket")) return "BASKETS";
+  return u.toUpperCase();
+}
+
+// Scans every word-like token for a recognizable date, rather than only
+// trusting the last word the way the structured parser does — a keyword
+// message can put the date anywhere ("ready Friday at the farm").
+function findDateAnywhere(text: string, referenceDate: Date): Date | null {
+  const tokens = text.match(/[A-Za-z0-9/-]+/g) ?? [];
+  for (const token of tokens) {
+    const date = extractDate(token, referenceDate);
+    if (date) return date;
+  }
+  return null;
+}
+
+// Looks for "at/from/near <place>" anywhere in the message. Captures up
+// to 4 words after the preposition, then trims off any trailing
+// connector word ("on", "for", "by") or word that's actually a date
+// ("...at Belval on Saturday" must not leave "on Saturday" stuck to the
+// location).
+function findLocationAnywhere(text: string, referenceDate: Date): string | null {
+  const match = text.match(/\b(?:at|from|near)\s+([A-Za-z][\w'-]*(?:\s+[A-Za-z][\w'-]*){0,3})/i);
+  if (!match) return null;
+
+  const words = match[1].split(/\s+/);
+  while (words.length > 1) {
+    const last = words[words.length - 1];
+    if (/^(on|for|by)$/i.test(last) || extractDate(last, referenceDate)) {
+      words.pop();
+    } else {
+      break;
+    }
+  }
+  return words.join(" ");
+}
+
+// The fallback pass — only ever called when the structured parser
+// couldn't confidently parse the message. Returns null (defer to the
+// structured pass's own issues list) unless it found a quantity,
+// product, AND location; never returns a partially-confident result of
+// its own, to avoid two differently-worded "what's missing" messages for
+// the same text.
+function parseByKeyword(text: string, referenceDate: Date): ParseResult | null {
+  const quantityMatch = text.match(QUANTITY_ANYWHERE_PATTERN);
+  if (!quantityMatch) return null;
+  const quantity = { value: parseFloat(quantityMatch[1]), unit: normalizeUnit(quantityMatch[2]) };
+  if (quantity.value <= 0) return null;
+
+  const product = findKnownProduct(text);
+  if (!product) return null;
+
+  const location = findLocationAnywhere(text, referenceDate);
+  if (!location) return null;
+
+  return {
+    intent: "PICKUP_REQUEST",
+    confident: true,
+    issues: [],
+    fields: {
+      product,
+      quantity: quantity.value,
+      unit: quantity.unit,
+      location: titleCase(location),
+      requestedPickupDate: findDateAnywhere(text, referenceDate),
+    },
+  };
+}
+
+// See the comment where this is used, in parseStructured's non-dash
+// branch — distinguishes terse shorthand from a natural sentence.
+const FILLER_WORDS = new Set([
+  "hey",
+  "hi",
+  "hello",
+  "its",
+  "it's",
+  "im",
+  "i'm",
+  "i",
+  "the",
+  "a",
+  "an",
+  "this",
+  "that",
+  "have",
+  "need",
+  "got",
+  "please",
+]);
+
+function parseStructured(text: string, referenceDate: Date): ParseResult {
   const dashParts = text
     .split(/\s*-\s*/)
     .map((p) => p.trim())
@@ -190,6 +350,21 @@ export function parseIncomingSms(raw: string, referenceDate: Date = new Date()):
       locParts = locParts.slice(0, -1);
     }
     locationRaw = locParts.join(" ");
+
+    // A real terse shorthand message ("Kwame Maize 200 Ajumako") never
+    // opens with a natural-sentence filler word — only free-form
+    // phrasing does ("Hey its Kwame...", "I have 200kg..."). Without
+    // this check, a bare number that happens to land in word 3 of an
+    // ordinary sentence (e.g. "...3 bags of rice...") gets confidently
+    // misread as the quantity, silently creating a wrong pickup instead
+    // of deferring to the keyword-extraction fallback below (§29: never
+    // invent). Blanking qtyRaw here forces "missing quantity", which is
+    // enough to keep this result from being trusted as confident.
+    const firstWord = (nameRaw ?? "").toLowerCase().replace(/[^a-z']/g, "");
+    const secondWord = (productRaw ?? "").toLowerCase().replace(/[^a-z']/g, "");
+    if (FILLER_WORDS.has(firstWord) || FILLER_WORDS.has(secondWord)) {
+      qtyRaw = undefined;
+    }
   }
 
   const issues: string[] = [];
@@ -235,4 +410,24 @@ export function parseIncomingSms(raw: string, referenceDate: Date = new Date()):
       requestedPickupDate,
     },
   };
+}
+
+export function parseIncomingSms(raw: string, referenceDate: Date = new Date()): ParseResult {
+  const text = (raw || "").trim();
+  if (!text) return { intent: "IRRELEVANT" };
+
+  const upper = text.toUpperCase();
+  if (upper === "CANCEL" || upper.startsWith("CANCEL ")) {
+    return { intent: "CANCEL" };
+  }
+
+  const structured = parseStructured(text, referenceDate);
+  if (structured.intent !== "PICKUP_REQUEST" || structured.confident) {
+    return structured;
+  }
+
+  // The structured pass recognized this as an attempt but couldn't
+  // confidently parse it — try reading it as free-form phrasing before
+  // giving up and flagging it for review.
+  return parseByKeyword(text, referenceDate) ?? structured;
 }
